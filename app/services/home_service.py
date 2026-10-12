@@ -7,9 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 AUMVEDA_LOGO_URL = (
-    "https://ihjbssbqwknyyzoewrik.supabase.co/"
-    "storage/v1/object/public/site-assets/"
-    "branding/logo%20without%20bg.webp"
+    "https://zgohazzneofbxnmqnhcl.supabase.co/storage/v1/object/public/site_assets/branding/logo%20without%20bg.webp"
 )
 
 
