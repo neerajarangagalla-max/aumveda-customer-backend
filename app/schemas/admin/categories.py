@@ -1,0 +1,1 @@
+"""Admin category schemas."""
