@@ -11,68 +11,68 @@ from app.core.config import settings
 
 app = FastAPI(
 
-    title=settings.app_name,
+        title=settings.app_name,
 
-    version="1.0.0",
+        version="1.0.0",
 
-    description=
-    "Backend API for AUMVEDA Customer Web and Customer Mobile",
+        description=
+        "Backend API for AUMVEDA Customer Web and Customer Mobile",
 
-)
-
-
+    )
 
 
 
 
 
-# ------------------------------------------------------------
-# CORS
-# ------------------------------------------------------------
+
+
+    # ------------------------------------------------------------
+    # CORS
+    # ------------------------------------------------------------
 
 
 app.add_middleware(
 
-    CORSMiddleware,
+        CORSMiddleware,
 
-    allow_origins=settings.allowed_origins,
+        allow_origins=settings.allowed_origins,
 
-    allow_credentials=True,
+        allow_credentials=True,
 
-    allow_methods=["*"],
+        allow_methods=["*"],
 
-    allow_headers=["*"],
+        allow_headers=["*"],
 
-)
-
-
+    )
 
 
 
 
 
-# ------------------------------------------------------------
-# API ROUTES
-# ------------------------------------------------------------
+
+
+    # ------------------------------------------------------------
+    # API ROUTES
+    # ------------------------------------------------------------
 
 
 app.include_router(
 
-    api_router,
+        api_router,
 
-    prefix=settings.api_v1_prefix,
+        prefix=settings.api_v1_prefix,
 
-)
-
-
+    )
 
 
 
 
 
-# ------------------------------------------------------------
-# ROOT
-# ------------------------------------------------------------
+
+
+    # ------------------------------------------------------------
+    # ROOT
+    # ------------------------------------------------------------
 
 
 @app.get("/")
@@ -80,23 +80,23 @@ app.include_router(
 async def root():
 
 
-    return {
+        return {
 
 
-        "application":
-        settings.app_name,
+            "application":
+            settings.app_name,
 
 
-        "environment":
-        settings.app_env,
+            "environment":
+            settings.app_env,
 
 
-        "api":
-        settings.api_v1_prefix,
+            "api":
+            settings.api_v1_prefix,
 
 
-        "status":
-        "running",
+            "status":
+            "running",
 
 
-    }
+        }

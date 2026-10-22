@@ -273,7 +273,6 @@ def create_order(
 def get_orders(
     customer_id: str = Depends(get_current_customer_id),
 ):
-
     try:
         response = (
             supabase
@@ -283,32 +282,25 @@ def get_orders(
                 id,
                 order_number,
                 customer_id,
-                address_id,
+                shipping_address_id,
+                shipping_address,
+                billing_address,
                 status,
                 payment_method,
                 payment_status,
                 currency,
                 subtotal,
-                delivery_charge,
+                shipping_amount,
                 discount_amount,
+                tax_amount,
                 total_amount,
-                recipient_name,
-                delivery_phone,
-                address_line1,
-                address_line2,
-                city,
-                state,
-                postal_code,
-                country,
+                customer_notes,
                 created_at,
                 updated_at
                 """
             )
             .eq("customer_id", customer_id)
-            .order(
-                "created_at",
-                desc=True,
-            )
+            .order("created_at", desc=True)
             .execute()
         )
 
@@ -324,9 +316,7 @@ def get_orders(
         raise
 
     except Exception as error:
-        logger.exception(
-            "Failed to load customer orders"
-        )
+        logger.exception("Failed to load customer orders")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -343,7 +333,6 @@ def get_order(
     order_id: UUID,
     customer_id: str = Depends(get_current_customer_id),
 ):
-
     try:
         response = (
             supabase
@@ -353,38 +342,21 @@ def get_order(
                 id,
                 order_number,
                 customer_id,
-                address_id,
+                shipping_address_id,
+                shipping_address,
+                billing_address,
                 status,
                 payment_method,
                 payment_status,
                 currency,
                 subtotal,
-                delivery_charge,
+                shipping_amount,
                 discount_amount,
+                tax_amount,
                 total_amount,
-                recipient_name,
-                delivery_phone,
-                address_line1,
-                address_line2,
-                city,
-                state,
-                postal_code,
-                country,
+                customer_notes,
                 created_at,
-                updated_at,
-                order_items(
-                    id,
-                    product_id,
-                    variant_id,
-                    product_name,
-                    product_slug,
-                    variant_name,
-                    image_url,
-                    unit_price,
-                    quantity,
-                    line_total,
-                    created_at
-                )
+                updated_at
                 """
             )
             .eq("id", str(order_id))
@@ -394,7 +366,6 @@ def get_order(
         )
 
         orders = response.data or []
-
         if not orders:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -410,9 +381,7 @@ def get_order(
         raise
 
     except Exception as error:
-        logger.exception(
-            "Failed to load order"
-        )
+        logger.exception("Failed to load order")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

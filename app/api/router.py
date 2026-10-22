@@ -24,7 +24,6 @@ from app.api.routes import (
     orders,
     products,
     profile,
-    recently_viewed,
     wishlist,
 )
 
@@ -117,9 +116,7 @@ api_router.include_router(
 # RECENTLY VIEWED
 # ------------------------------------------------------------
 
-api_router.include_router(
-    recently_viewed.router
-)
+
 
 
 # ------------------------------------------------------------

@@ -18,6 +18,10 @@ class AuthRequest(BaseModel):
         password: str
 
 
+class RefreshSessionRequest(BaseModel):
+        refresh_token: str
+
+
 @router.post("/register")
 async def register_user(payload: AuthRequest):
 
@@ -116,6 +120,38 @@ async def login_user(payload: AuthRequest):
                 status_code=401,
                 detail="Invalid email or password.",
             )
+
+
+@router.post("/refresh")
+async def refresh_auth_session(payload: RefreshSessionRequest):
+        try:
+            response = supabase_auth.auth.refresh_session(
+                {"refresh_token": payload.refresh_token}
+            )
+            session = getattr(response, "session", None)
+            if not session:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or expired refresh token.",
+                )
+
+            return {
+                "status": "success",
+                "access_token": session.access_token,
+                "refresh_token": session.refresh_token,
+            }
+
+        except HTTPException:
+            raise
+
+        except Exception:
+            logger.exception("Session refresh failed")
+            raise HTTPException(
+                status_code=401,
+                detail="Unable to refresh session.",
+            )
+
+
 @router.get("/profile")
 async def get_profile(
     user=Depends(get_current_user)

@@ -14,9 +14,13 @@ router = APIRouter(
 # ============================================================
 
 @router.get("")
-def get_products():
+def get_products(limit: int = 20, offset: int = 0):
 
     try:
+
+        # Keep the page size within reasonable limits.
+        limit = max(1, min(limit, 50))
+        offset = max(0, offset)
 
         response = (
             supabase
@@ -29,7 +33,6 @@ def get_products():
                 name,
                 slug,
                 short_description,
-                description,
                 status,
                 is_featured,
                 average_rating,
@@ -46,12 +49,15 @@ def get_products():
                     price,
                     compare_at_price,
                     stock_quantity,
-                    is_default,
+                    attributes,
                     is_active
                 )
-                """
+                """,
+                count="none",
             )
             .eq("status", "active")
+            .order("name")
+            .range(offset, offset + limit - 1)
             .execute()
         )
 
@@ -95,7 +101,9 @@ def get_products():
                 (
                     variant
                     for variant in active_variants
-                    if variant.get("is_default", False)
+                    if (variant.get("attributes") or {}).get(
+                        "is_default"
+                    ) is True
                 ),
                 None
             )
