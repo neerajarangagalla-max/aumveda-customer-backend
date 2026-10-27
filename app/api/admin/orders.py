@@ -82,23 +82,36 @@ def get_order(order_id: str):
         ) from exc
 
 
+
 @router.patch("/{order_id}/status")
 def update_order_status(order_id: str, payload: OrderStatusUpdate):
     try:
         existing = (
             supabase.table("orders")
-            .select("id")
+            .select("id, status")
             .eq("id", order_id)
             .maybe_single()
             .execute()
         )
 
         if not existing.data:
-            raise HTTPException(status_code=404, detail="Order not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        previous_status = existing.data["status"]
+        new_status = payload.status
+
+        if previous_status == new_status:
+            return {
+                "message": "Order status is unchanged",
+                "order": existing.data,
+            }
 
         result = (
             supabase.table("orders")
-            .update({"status": payload.status})
+            .update({"status": new_status})
             .eq("id", order_id)
             .execute()
         )
@@ -109,14 +122,47 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate):
                 detail="Order status was not updated",
             )
 
+        updated_order = result.data[0]
+
+        try:
+            supabase.table("order_status_history").insert({
+                "order_id": order_id,
+                "status": new_status,
+                "notes": (
+                    f"Status changed from {previous_status} "
+                    f"to {new_status} by admin"
+                ),
+            }).execute()
+
+        except Exception as history_error:
+            try:
+                supabase.table("orders").update({
+                    "status": previous_status,
+                }).eq("id", order_id).execute()
+            except Exception:
+                pass
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Unable to record order status history. "
+                    "The status rollback was attempted."
+                ),
+            ) from history_error
+
         return {
-            "message": "Order status updated",
-            "order": result.data[0],
+            "message": "Order status updated and history recorded",
+            "order": updated_order,
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail="Unable to update order status; verify allowed database statuses",
+            detail=(
+                "Unable to update order status; "
+                "verify allowed database statuses"
+            ),
         ) from exc
