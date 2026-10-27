@@ -83,8 +83,13 @@ def get_order(order_id: str):
 
 
 
+
 @router.patch("/{order_id}/status")
-def update_order_status(order_id: str, payload: OrderStatusUpdate):
+def update_order_status(
+    order_id: str,
+    payload: OrderStatusUpdate,
+    current_admin=Depends(get_current_admin),
+):
     try:
         existing = (
             supabase.table("orders")
@@ -128,6 +133,7 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate):
             supabase.table("order_status_history").insert({
                 "order_id": order_id,
                 "status": new_status,
+                "changed_by": str(current_admin.id),
                 "notes": (
                     f"Status changed from {previous_status} "
                     f"to {new_status} by admin"
@@ -161,8 +167,5 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate):
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Unable to update order status; "
-                "verify allowed database statuses"
-            ),
+            detail="Unable to update order status",
         ) from exc
