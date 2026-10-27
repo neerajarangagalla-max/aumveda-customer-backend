@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/admin/dashboard",
     tags=["Admin Dashboard"],
@@ -41,6 +43,7 @@ def get_dashboard_summary():
             "total_orders": count_rows("orders"),
         }
     except Exception as exc:
+        logger.exception("Failed to load dashboard statistics")
         raise HTTPException(
             status_code=500,
             detail="Unable to load dashboard statistics",

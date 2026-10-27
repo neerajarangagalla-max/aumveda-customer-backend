@@ -25,6 +25,7 @@ from app.api.routes import (
     products,
     profile,
     wishlist,
+    reviews,
 )
 
 
@@ -39,7 +40,9 @@ api_router.include_router(
     health.router
 )
 
-
+api_router.include_router(
+    reviews.router
+)
 # ------------------------------------------------------------
 # DATABASE
 # ------------------------------------------------------------

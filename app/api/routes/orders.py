@@ -269,42 +269,116 @@ def create_order(
 # GET ORDERS
 # ============================================================
 
+
 @router.get("")
 def get_orders(
     customer_id: str = Depends(get_current_customer_id),
 ):
     try:
+        # 1. Get all orders belonging to this customer.
         response = (
             supabase
             .table("orders")
-            .select(
-                """
-                id,
-                order_number,
-                customer_id,
-                shipping_address_id,
-                shipping_address,
-                billing_address,
-                status,
-                payment_method,
-                payment_status,
-                currency,
-                subtotal,
-                shipping_amount,
-                discount_amount,
-                tax_amount,
-                total_amount,
-                customer_notes,
-                created_at,
-                updated_at
-                """
-            )
+            .select("*")
             .eq("customer_id", customer_id)
             .order("created_at", desc=True)
             .execute()
         )
 
         orders = response.data or []
+
+        # Return an empty list if the customer has no orders.
+        if not orders:
+            return {
+                "status": "success",
+                "count": 0,
+                "data": [],
+            }
+
+        # 2. Fetch all items belonging to these orders.
+        order_ids = [order["id"] for order in orders]
+
+        items_response = (
+            supabase
+            .table("order_items")
+            .select("*")
+            .in_("order_id", order_ids)
+            .execute()
+        )
+
+        order_items = items_response.data or []
+
+        # 3. Collect product and variant IDs.
+        product_ids = list({
+            item["product_id"]
+            for item in order_items
+            if item.get("product_id")
+        })
+
+        variant_ids = list({
+            item["variant_id"]
+            for item in order_items
+            if item.get("variant_id")
+        })
+
+        # 4. Fetch product details, including available image fields.
+        products = []
+        if product_ids:
+            products_response = (
+                supabase
+                .table("products")
+                .select("*")
+                .in_("id", product_ids)
+                .execute()
+            )
+            products = products_response.data or []
+
+        # 5. Fetch variant details.
+        variants = []
+        if variant_ids:
+            variants_response = (
+                supabase
+                .table("product_variants")
+                .select("*")
+                .in_("id", variant_ids)
+                .execute()
+            )
+            variants = variants_response.data or []
+
+        # 6. Create lookup dictionaries.
+        products_by_id = {
+            product["id"]: product
+            for product in products
+        }
+
+        variants_by_id = {
+            variant["id"]: variant
+            for variant in variants
+        }
+
+        # 7. Attach products and variants to each order item.
+        items_by_order = {}
+
+        for item in order_items:
+            item["product"] = products_by_id.get(
+                item.get("product_id")
+            )
+            item["variant"] = variants_by_id.get(
+                item.get("variant_id")
+            )
+
+            order_id = item["order_id"]
+
+            if order_id not in items_by_order:
+                items_by_order[order_id] = []
+
+            items_by_order[order_id].append(item)
+
+        # 8. Attach items to every order.
+        for order in orders:
+            order["items"] = items_by_order.get(
+                order["id"], []
+            )
 
         return {
             "status": "success",
@@ -328,12 +402,14 @@ def get_orders(
 # GET SINGLE ORDER
 # ============================================================
 
+
 @router.get("/{order_id}")
 def get_order(
     order_id: UUID,
     customer_id: str = Depends(get_current_customer_id),
 ):
     try:
+        # 1. Fetch the order belonging to the authenticated customer.
         response = (
             supabase
             .table("orders")
@@ -350,9 +426,9 @@ def get_order(
                 payment_status,
                 currency,
                 subtotal,
-                shipping_amount,
-                discount_amount,
-                tax_amount,
+                shipping,
+                discount,
+                tax,
                 total_amount,
                 customer_notes,
                 created_at,
@@ -366,15 +442,89 @@ def get_order(
         )
 
         orders = response.data or []
+
         if not orders:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Order not found.",
             )
 
+        order = orders[0]
+
+        # 2. Fetch items belonging to this order.
+        items_response = (
+            supabase
+            .table("order_items")
+            .select("*")
+            .eq("order_id", str(order_id))
+            .execute()
+        )
+
+        order_items = items_response.data or []
+
+        # 3. Collect product and variant IDs.
+        product_ids = list({
+            item["product_id"]
+            for item in order_items
+            if item.get("product_id")
+        })
+
+        variant_ids = list({
+            item["variant_id"]
+            for item in order_items
+            if item.get("variant_id")
+        })
+
+        # 4. Fetch product details.
+        products = []
+        if product_ids:
+            products_response = (
+    supabase
+    .table("products")
+    .select("*, product_images(*)")
+    .in_("id", product_ids)
+    .execute()
+)
+            products = products_response.data or []
+
+        # 5. Fetch variant details.
+        variants = []
+        if variant_ids:
+            variants_response = (
+                supabase
+                .table("product_variants")
+                .select("*")
+                .in_("id", variant_ids)
+                .execute()
+            )
+            variants = variants_response.data or []
+
+        products_by_id = {
+            str(product["id"]): product
+            for product in products
+        }
+
+        variants_by_id = {
+            str(variant["id"]): variant
+            for variant in variants
+        }
+
+        # 6. Attach product and variant details to each item.
+        for item in order_items:
+            item["product"] = products_by_id.get(
+                str(item.get("product_id"))
+            )
+
+            item["variant"] = variants_by_id.get(
+                str(item.get("variant_id"))
+            )
+
+        # 7. Include the items in the order response.
+        order["items"] = order_items
+
         return {
             "status": "success",
-            "data": orders[0],
+            "data": order,
         }
 
     except HTTPException:
@@ -385,5 +535,5 @@ def get_order(
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load order: {str(error)}",
+            detail="Failed to load order details.",
         )

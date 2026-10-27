@@ -28,6 +28,7 @@ class OrderStatusUpdate(BaseModel):
 @router.get("")
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),
+    search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
@@ -36,7 +37,8 @@ def list_orders(
 
         if status_filter:
             query = query.eq("status", status_filter)
-
+        if search and search.strip():
+            query = query.ilike("order_number", f"%{search.strip()}%")
         result = (
             query.order("created_at", desc=True)
             .range(offset, offset + limit - 1)

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-
+from app.core.supabase import supabase
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
 
@@ -28,7 +28,10 @@ def list_customers(
             query = query.eq("is_active", active)
 
         if search:
-            query = query.ilike("full_name", f"%{search}%")
+            safe_search = search.strip().replace(",", "").replace("(", "").replace(")", "")
+            query = query.or_(
+                f"full_name.ilike.%{safe_search}%,email.ilike.%{safe_search}%,phone.ilike.%{safe_search}%"
+                )
 
         result = (
             query.order("created_at", desc=True)
