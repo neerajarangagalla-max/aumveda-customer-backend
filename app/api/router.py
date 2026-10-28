@@ -12,6 +12,8 @@ from app.api.admin import (
     reviews as admin_reviews,
     settings as admin_settings,
     vendors as admin_vendors,
+    returns as admin_returns,
+
 )
 from app.api.routes import (
     addresses,
@@ -26,6 +28,7 @@ from app.api.routes import (
     profile,
     wishlist,
     reviews,
+    returns,
 )
 
 
@@ -39,7 +42,9 @@ api_router = APIRouter()
 api_router.include_router(
     health.router
 )
-
+api_router.include_router(
+    returns.router
+)
 api_router.include_router(
     reviews.router
 )
@@ -186,4 +191,7 @@ api_router.include_router(
 
 api_router.include_router(
     admin_settings.router
+)
+api_router.include_router(
+    admin_returns.router
 )
