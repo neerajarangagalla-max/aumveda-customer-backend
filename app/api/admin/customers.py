@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.supabase import supabase
 from app.core.security import get_current_admin
-from app.core.supabase import supabase
 
 router = APIRouter(
     prefix="/admin/customers",

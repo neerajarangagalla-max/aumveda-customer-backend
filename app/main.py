@@ -28,7 +28,6 @@ app.include_router(
 )
 
 
-# Root endpoint
 @app.get("/")
 async def root():
     return {

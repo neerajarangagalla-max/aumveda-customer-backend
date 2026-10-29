@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
-
+import logging
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/admin/finance",
     tags=["Admin Finance"],
@@ -31,13 +32,11 @@ def list_table_records(
             "offset": offset,
         }
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Unable to retrieve {table_name} records; "
-                "verify the table schema"
-            ),
-        ) from exc
+        logger.exception("Failed to retrieve finance records from %s", table_name)
+    raise HTTPException(
+        status_code=500,
+        detail=f"Unable to retrieve {table_name} records",
+    ) from exc
 
 
 @router.get("/payments")
