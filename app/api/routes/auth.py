@@ -148,36 +148,36 @@ async def refresh_auth_session(payload: RefreshSessionRequest):
             )
 
 
+
 @router.get("/profile")
-async def get_profile(
-    user=Depends(get_current_user)
-):
+async def get_profile(user=Depends(get_current_user)):
     try:
+        response = (
+            supabase_admin.table("profiles")
+            .select("*")
+            .eq("id", user.id)
+            .limit(1)
+            .execute()
+        )
+
+        profile_rows = response.data or []
+        profile = profile_rows[0] if profile_rows else {}
+
         return {
             "status": "success",
             "data": {
+                **profile,
                 "id": user.id,
                 "email": user.email,
             },
         }
 
     except Exception as error:
-        logger.exception(
-            "Profile retrieval failed"
-        )
-
+        logger.exception("Profile retrieval failed")
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve profile.",
         ) from error
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(BaseModel):
-    access_token: str
-    password: str
 
 
 @router.post("/forgot-password")
