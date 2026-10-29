@@ -1,4 +1,4 @@
-from uuid import UUID
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -199,7 +199,7 @@ async def get_wishlist(user=Depends(get_current_user)):
 
 @router.post("/{product_id}")
 async def add_product_to_wishlist(
-    product_id: UUID,
+    product_id: str,
     user=Depends(get_current_user),
 ):
     try:
@@ -229,7 +229,7 @@ async def add_product_to_wishlist(
 
 @router.delete("/{product_id}")
 async def delete_product_from_wishlist(
-    product_id: UUID,
+    product_id: str,
     user=Depends(get_current_user),
 ):
     try:
