@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
 import logging
+import time
 from typing import Literal
 from uuid import UUID
-import time
+
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from app.api.routes.orders import get_current_customer_id
@@ -124,7 +125,7 @@ def create_return_request(
         raise
 
     except Exception as exc:
-        logger.exception("Failed to create return request: %s", exc)
+        logger.exception("Failed to create return request")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to create return request.",
@@ -177,7 +178,7 @@ def get_customer_return_requests(
         raise
 
     except Exception as exc:
-        logger.exception("Failed to retrieve customer return requests: %s", exc)
+        logger.exception("Failed to retrieve customer return requests")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve return requests.",

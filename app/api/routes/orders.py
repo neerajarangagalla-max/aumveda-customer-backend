@@ -200,9 +200,8 @@ def create_order(
             if not order:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Order creation returned no data.",
-                )
-
+                    detail="Unable to create order. Please try again.",
+                    )
             order = order[0]
 
         return {
@@ -389,14 +388,12 @@ def get_orders(
     except HTTPException:
         raise
 
-    except Exception as error:
+    except Exception:
         logger.exception("Failed to load customer orders")
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load orders: {str(error)}",
-        )
-
+            detail="Unable to load orders.",
+            )
 
 # ============================================================
 # GET SINGLE ORDER

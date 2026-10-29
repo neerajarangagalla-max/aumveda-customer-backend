@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
 from app.core.supabase import supabase
+import logging
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/products",
@@ -192,11 +194,10 @@ def get_products(limit: int = 20, offset: int = 0):
         return products
 
 
-    except Exception as error:
-
+    except Exception:
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail="Unable to retrieve products.",
         )
 
 
@@ -224,11 +225,10 @@ def get_categories():
         return response.data
 
 
-    except Exception as error:
-
+    except Exception:
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail="Unable to retrieve categories.",
         )
 
 

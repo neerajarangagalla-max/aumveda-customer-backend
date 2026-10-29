@@ -57,8 +57,9 @@ def create_review(
             supabase.table("orders")
             .select("id")
             .eq("customer_id", str(customer_id))
+            .eq("status", "delivered")
             .execute()
-        )
+            )
 
         order_ids = [
             order["id"]
@@ -151,7 +152,7 @@ def create_review(
 
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to submit product review")
         raise HTTPException(
             status_code=500,
@@ -179,7 +180,7 @@ def get_product_reviews(product_id: UUID):
             "data": result.data or [],
         }
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to retrieve product reviews")
         raise HTTPException(
             status_code=500,

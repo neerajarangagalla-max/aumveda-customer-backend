@@ -31,10 +31,10 @@ async def database_test():
             "records_returned": len(response.data or []),
         }
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Supabase database connectivity test failed")
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database connectivity test failed: {str(exc)}",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Database connectivity test failed.",
+    )

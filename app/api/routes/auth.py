@@ -1,5 +1,5 @@
 import logging
-
+from app.core.config import settings
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from app.core.supabase import supabase_admin, supabase_auth
@@ -66,16 +66,12 @@ async def register_user(payload: AuthRequest):
 
         except HTTPException:
             raise
-
-        except Exception as error:
-            logger.exception(
-                "Registration failed"
-            )
-
+        except Exception:
+            logger.exception("Registration failed")
             raise HTTPException(
-                status_code=400,
-                detail=str(error),
-            )
+        status_code=400,
+        detail="Unable to register. Please try again.",
+    )
 
 
 @router.post("/login")
@@ -190,22 +186,21 @@ async def forgot_password(payload: ForgotPasswordRequest):
         supabase_auth.auth.reset_password_for_email(
             payload.email,
             {
-                "redirect_to": "aumveda://reset-password",
-            },
+                "redirect_to": settings.mobile_reset_url,
+                }
         )
 
         return {
             "status": "success",
             "message": "If an account exists with this email, a password reset link has been sent.",
         }
-
-    except Exception as error:
+    except Exception:
         logger.exception("Password reset request failed")
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        ) from error
 
+    raise HTTPException(
+        status_code=400,
+        detail="Unable to process the password reset request.",
+    )
 
 @router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest):

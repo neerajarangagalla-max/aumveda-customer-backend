@@ -724,17 +724,13 @@ def get_cart(
     except HTTPException:
 
         raise
+    except Exception:
+        logger.exception("Failed to load cart")
 
-    except Exception as error:
-
-        logger.exception(
-            "Failed to load cart"
-        )
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load cart: {str(error)}",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to load cart.",
+    )
 
 
 # ============================================================

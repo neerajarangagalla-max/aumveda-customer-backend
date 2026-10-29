@@ -1,3 +1,4 @@
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,7 +17,6 @@ class Settings(BaseSettings):
 
     api_v1_prefix: str = "/api/v1"
 
-
     # ---------------------------------------------------------
     # SUPABASE
     # ---------------------------------------------------------
@@ -27,34 +27,19 @@ class Settings(BaseSettings):
     supabase_secret_key: str | None = None
     supabase_service_role_key: str | None = None
 
-
     # ---------------------------------------------------------
     # FRONTEND / MOBILE
     # ---------------------------------------------------------
 
     frontend_url: str = "http://localhost:5173"
-
     mobile_reset_url: str = "aumveda://reset-password"
 
-
     # ---------------------------------------------------------
     # CORS
+    # Configure origins through CORS_ORIGINS in .env and Render.
     # ---------------------------------------------------------
 
-    
-    # ---------------------------------------------------------
-    # CORS
-    # ---------------------------------------------------------
-
-    cors_origins: str = (
-        "http://localhost:5173,"
-        "http://127.0.0.1:5173,"
-        "http://localhost:8081,"
-        "http://127.0.0.1:8081,"
-        "http://192.168.0.31:8081"
-    )
-
-
+    cors_origins: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -62,7 +47,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
-
 
     @property
     def allowed_origins(self) -> list[str]:
@@ -72,23 +56,19 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
-
     @property
     def auth_client_key(self) -> str:
-        return (
-            self.supabase_anon_key
-            or self.supabase_secret_key
-            or ""
-        )
-
+        if not self.supabase_anon_key:
+            raise ValueError("SUPABASE_ANON_KEY is not configured")
+        return self.supabase_anon_key
 
     @property
     def admin_client_key(self) -> str:
-        return (
-            self.supabase_service_role_key
-            or self.supabase_secret_key
-            or ""
-        )
+        if not self.supabase_service_role_key:
+            raise ValueError(
+                "SUPABASE_SERVICE_ROLE_KEY is not configured"
+            )
+        return self.supabase_service_role_key
 
 
 @lru_cache
