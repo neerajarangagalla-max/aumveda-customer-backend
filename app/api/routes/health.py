@@ -14,4 +14,3 @@ async def health_check():
         "service": settings.app_name,
         "message": f"{settings.app_name} is running",
     }
-.
