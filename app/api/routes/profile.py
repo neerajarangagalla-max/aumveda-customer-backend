@@ -82,9 +82,7 @@ async def update(
 
         # Keep both name fields consistent when either is provided.
         if "name" in update_data:
-            update_data["full_name"] = update_data["name"]
-        elif "full_name" in update_data:
-            update_data["name"] = update_data["full_name"]
+            update_data["full_name"] = update_data.pop("name")
 
         data = _update_profile(user.id, update_data)
 
