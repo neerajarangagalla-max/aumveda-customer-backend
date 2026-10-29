@@ -523,14 +523,17 @@ def get_order(
             "status": "success",
             "data": order,
         }
-
     except HTTPException:
         raise
-
     except Exception as error:
-        logger.exception("Failed to load order")
+        logger.exception(
+        "Failed to load order %s for customer %s: %s",
+        order_id,
+        customer_id,
+        str(error),
+    )
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to load order details.",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to load order details. Please try again.",
+    )
