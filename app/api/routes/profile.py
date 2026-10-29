@@ -71,16 +71,22 @@ async def profile(user=Depends(get_current_user)):
         )
 
 
+
 @router.patch("")
 async def update(
     payload: ProfileUpdate,
     user=Depends(get_current_user),
 ):
     try:
-        data = _update_profile(
-            user.id,
-            payload.model_dump(),
-        )
+        update_data = payload.model_dump(exclude_unset=True)
+
+        # Keep both name fields consistent when either is provided.
+        if "name" in update_data:
+            update_data["full_name"] = update_data["name"]
+        elif "full_name" in update_data:
+            update_data["name"] = update_data["full_name"]
+
+        data = _update_profile(user.id, update_data)
 
         if data is None:
             raise HTTPException(
