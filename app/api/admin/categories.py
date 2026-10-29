@@ -215,10 +215,7 @@ def update_category(category_id: UUID, payload: CategoryUpdate):
                     detail="Category name cannot be empty",
                 )
 
-        if "slug" in data and data["slug"] is not None:
-            data["slug"] = make_slug(data["slug"])
-        elif data.get("name"):
-            data["slug"] = make_slug(data["name"])
+        
 
         if "slug" in data and not data["slug"]:
             raise HTTPException(

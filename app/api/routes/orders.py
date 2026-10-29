@@ -1,5 +1,6 @@
 import logging
-
+import time
+import httpx
 from typing import Literal
 from uuid import UUID
 
@@ -400,6 +401,24 @@ def get_orders(
 # ============================================================
 
 
+def execute_supabase_read(query, retries=3):
+    for attempt in range(retries):
+        try:
+            return query.execute()
+        except (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException):
+            if attempt == retries - 1:
+                raise
+            delay = 0.5 * (2 ** attempt)
+            logger.warning(
+                "Supabase read failed; retrying in %s seconds "
+                "(attempt %s/%s)",
+                delay,
+                attempt + 1,
+                retries,
+            )
+            time.sleep(delay)
+
+
 
 @router.get("/{order_id}")
 def get_order(
@@ -507,11 +526,12 @@ def get_order(
             logger.info("GET ORDER: Fetching variants")
 
             variants_response = (
-                supabase
-                .table("product_variants")
-                .select("*")
-                .in_("id", variant_ids)
-                .execute()
+                execute_supabase_read(
+                    supabase
+                    .table("product_variants")
+                    .select("*")
+                    .in_("id", variant_ids)
+                )
             )
 
             variants = variants_response.data or []
