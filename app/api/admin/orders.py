@@ -31,8 +31,7 @@ class OrderStatusUpdate(BaseModel):
 
 ALLOWED_ORDER_TRANSITIONS = {
     "placed": {"processing", "cancelled"},
-    "processing": {"partially_shipped", "shipped", "cancelled"},
-    "partially_shipped": {"shipped", "cancelled"},
+    "processing": {"shipped", "cancelled"},
     "shipped": {"delivered"},
     "delivered": set(),
     "cancelled": set(),
