@@ -16,15 +16,52 @@ router = APIRouter(
 # ============================================================
 
 @router.get("")
-def get_products(limit: int = 20, offset: int = 0):
+def get_products(
+    limit: int = 20,
+    offset: int = 0,
+    category_id: str | None = None,
+    subcategory_id: str | None = None,
+):
 
     try:
+
+        # Validate subcategory if supplied.
+        if subcategory_id:
+            subcategory_response = (
+                supabase
+                .table("categories")
+                .select("id, parent_id, is_active")
+                .eq("id", subcategory_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            subcategories = subcategory_response.data or []
+            if not subcategories:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Subcategory not found.",
+                )
+            selected_subcategory = subcategories[0]
+            if not selected_subcategory.get("parent_id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="The selected category is not a subcategory.",
+                )
+            if (
+                category_id
+                and selected_subcategory["parent_id"] != category_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Subcategory does not belong to this category.",
+                )
 
         # Keep the page size within reasonable limits.
         limit = max(1, min(limit, 50))
         offset = max(0, offset)
 
-        response = (
+        query = (
             supabase
             .table("products")
             .select(
@@ -58,6 +95,26 @@ def get_products(limit: int = 20, offset: int = 0):
                 count="none",
             )
             .eq("status", "active")
+        )
+
+        if subcategory_id:
+            query = query.eq("category_id", subcategory_id)
+        elif category_id:
+            subcategory_response = (
+                supabase
+                .table("categories")
+                .select("id")
+                .eq("parent_id", category_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            category_ids = [category_id] + [
+                category["id"] for category in subcategory_response.data or []
+            ]
+            query = query.in_("category_id", category_ids)
+
+        response = (
+            query
             .order("name")
             .range(offset, offset + limit - 1)
             .execute()
@@ -194,7 +251,10 @@ def get_products(limit: int = 20, offset: int = 0):
         return products
 
 
+    except HTTPException:
+        raise
     except Exception:
+        logger.exception("Products API failed")
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve products.",

@@ -22,6 +22,15 @@ class RefreshSessionRequest(BaseModel):
         refresh_token: str
 
 
+class ForgotPasswordRequest(BaseModel):
+        email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+        access_token: str
+        password: str
+
+
 @router.post("/register")
 async def register_user(payload: AuthRequest):
 
@@ -187,7 +196,7 @@ async def forgot_password(payload: ForgotPasswordRequest):
             payload.email,
             {
                 "redirect_to": settings.mobile_reset_url,
-                }
+            }
         )
 
         return {
@@ -196,11 +205,10 @@ async def forgot_password(payload: ForgotPasswordRequest):
         }
     except Exception:
         logger.exception("Password reset request failed")
-
-    raise HTTPException(
-        status_code=400,
-        detail="Unable to process the password reset request.",
-    )
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to process the password reset request.",
+        )
 
 @router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest):
