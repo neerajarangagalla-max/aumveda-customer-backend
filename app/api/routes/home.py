@@ -194,3 +194,102 @@ async def get_home_bundles():
             status_code=500,
             detail="Unable to retrieve homepage bundles",
         )
+
+@router.get("/shop-by-concern")
+async def get_shop_by_concern():
+    try:
+        response = (
+            supabase
+            .table("order_items")
+            .select(
+                """
+                quantity,
+                order:orders!inner(
+                    id,
+                    status
+                ),
+                product:products!inner(
+                    id,
+                    category:categories!inner(
+                        id,
+                        name,
+                        slug,
+                        image_url,
+                        parent_id,
+                        is_active
+                    )
+                )
+                """
+            )
+            .eq("status", "delivered")
+            .eq("order.status", "delivered")
+            .eq("product.category.is_active", True)
+            .execute()
+        )
+
+        subcategory_sales = {}
+
+        for item in response.data or []:
+            product = item.get("product") or {}
+            category = product.get("category") or {}
+
+            if not category.get("id") or not category.get("parent_id"):
+                continue
+
+            category_id = str(category["id"])
+
+            if category_id not in subcategory_sales:
+                subcategory_sales[category_id] = {
+                    "id": category_id,
+                    "name": category.get("name"),
+                    "slug": category.get("slug"),
+                    "image_url": category.get("image_url"),
+                    "units_sold": 0,
+                    "total_orders": set(),
+                }
+
+            subcategory_sales[category_id]["units_sold"] += (
+                item.get("quantity") or 0
+            )
+
+            order = item.get("order") or {}
+            if order.get("id"):
+                subcategory_sales[category_id]["total_orders"].add(
+                    order["id"]
+                )
+
+        results = []
+
+        for category in subcategory_sales.values():
+            results.append({
+                "id": category["id"],
+                "name": category["name"],
+                "slug": category["slug"],
+                "image_url": category["image_url"],
+                "units_sold": category["units_sold"],
+                "total_orders": len(category["total_orders"]),
+            })
+
+        results.sort(
+            key=lambda item: (
+                -item["units_sold"],
+                -item["total_orders"],
+                item["name"] or "",
+            )
+        )
+
+        results = results[:8]
+
+        return {
+            "status": "success",
+            "count": len(results),
+            "data": results,
+        }
+
+    except Exception:
+        logger.exception("Shop by Concern API failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve popular subcategories",
+        )
