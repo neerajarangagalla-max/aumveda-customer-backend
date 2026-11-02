@@ -195,7 +195,6 @@ async def get_home_bundles():
             detail="Unable to retrieve homepage bundles",
         )
 
-
 @router.get("/shop-by-concern")
 async def get_shop_by_concern():
     try:
@@ -313,4 +312,51 @@ async def get_shop_by_concern():
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve popular subcategories",
+        )
+
+@router.get("/coupons")
+async def get_home_coupons():
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        response = (
+            supabase
+            .table("coupons")
+            .select(
+                """
+                id,
+                code,
+                description,
+                discount_type,
+                discount_value,
+                min_order_value,
+                max_discount_amount,
+                starts_at,
+                expires_at,
+                first_order_only
+                """
+            )
+            .eq("is_active", True)
+            .lte("starts_at", now)
+            .gt("expires_at", now)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        coupons = response.data or []
+
+        return {
+            "status": "success",
+            "count": len(coupons),
+            "data": coupons,
+        }
+
+    except Exception:
+        logger.exception("Failed to retrieve homepage coupons")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve homepage coupons",
         )
