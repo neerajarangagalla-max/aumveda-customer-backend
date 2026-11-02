@@ -360,3 +360,110 @@ async def get_home_coupons():
             status_code=500,
             detail="Unable to retrieve homepage coupons",
         )
+
+@router.get("/new-arrivals")
+async def get_new_arrivals():
+    try:
+        response = (
+    supabase
+    .table("products")
+    .select(
+        """
+        id,
+        name,
+        slug,
+        short_description,
+        average_rating,
+        review_count,
+        created_at,
+        product_variants(
+            id,
+            name,
+            price,
+            compare_at_price,
+            stock_quantity,
+            attributes
+        ),
+        product_images(
+            id,
+            image_url,
+            alt_text,
+            is_primary,
+            sort_order
+        )
+        """
+    )
+    .eq("status", "active")
+    .order("created_at", desc=True)
+    .limit(10)
+    .execute()
+)
+
+        products = []
+
+        for product in response.data or []:
+            variants = product.get("product_variants") or []
+            images = product.get("product_images") or []
+
+            default_variant = next(
+                (
+                    variant
+                    for variant in variants
+                    if (variant.get("attributes") or {}).get(
+                        "is_default"
+                    ) is True
+                ),
+                None,
+            )
+
+            if default_variant is None and variants:
+                default_variant = variants[0]
+
+            primary_image = next(
+                (
+                    image
+                    for image in images
+                    if image.get("is_primary") is True
+                ),
+                None,
+            )
+
+            if primary_image is None and images:
+                primary_image = images[0]
+
+            products.append({
+                "id": product["id"],
+                "name": product["name"],
+                "slug": product["slug"],
+                "description": product.get("short_description"),
+                "rating": product.get("average_rating") or 0,
+                "review_count": product.get("review_count") or 0,
+                "price": (
+                    default_variant.get("price")
+                    if default_variant else None
+                ),
+                "compare_at_price": (
+                    default_variant.get("compare_at_price")
+                    if default_variant else None
+                ),
+                "variant": default_variant,
+                "image": (
+                    primary_image.get("image_url")
+                    if primary_image else None
+                ),
+                "created_at": product.get("created_at"),
+            })
+
+        return {
+            "status": "success",
+            "count": len(products),
+            "data": products,
+        }
+
+    except Exception:
+        logger.exception("New Arrivals API failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve new arrivals",
+        )
