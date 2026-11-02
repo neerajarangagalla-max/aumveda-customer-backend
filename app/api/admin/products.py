@@ -44,8 +44,29 @@ def _database_error(exc: Exception) -> HTTPException:
         return HTTPException(422, str(exc))
 
     return HTTPException(500, "Product operation failed")
+def _database_error(exc: Exception) -> HTTPException:
+    print("PRODUCT DATABASE ERROR:", repr(exc))
 
+    message = str(exc).lower()
 
+    if "product_not_found" in message:
+        return HTTPException(404, "Product not found")
+
+    if "duplicate key" in message or "unique constraint" in message:
+        return HTTPException(
+            409, "A product slug or variant SKU already exists"
+        )
+
+    if (
+        "foreign key" in message
+        or "invalid input syntax for type uuid" in message
+    ):
+        return HTTPException(400, "Invalid product, vendor, or category ID")
+
+    if "compare-at price" in message or "primary image" in message:
+        return HTTPException(422, str(exc))
+
+    return HTTPException(500, "Product operation failed")
 @router.get("")
 def list_products(
     status_filter: ProductStatus | None = Query(

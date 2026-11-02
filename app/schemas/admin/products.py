@@ -1,5 +1,6 @@
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -36,6 +37,10 @@ class AdminProductVariantCreate(BaseModel):
                 "Compare-at price must be greater than or equal to price"
             )
         return self
+
+
+class AdminProductVariantUpdate(AdminProductVariantCreate):
+    id: UUID | None = None
 
 
 class AdminProductImageCreate(BaseModel):
@@ -109,7 +114,7 @@ class AdminProductUpdate(BaseModel):
     status: ProductStatus | None = None
     is_featured: bool | None = None
 
-    variants: list[AdminProductVariantCreate] | None = None
+    variants: list[AdminProductVariantUpdate] | None = None
     images: list[AdminProductImageCreate] | None = None
 
     @model_validator(mode="after")

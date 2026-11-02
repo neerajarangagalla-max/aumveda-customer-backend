@@ -14,6 +14,7 @@ from app.api.admin import (
     reviews as admin_reviews,
     settings as admin_settings,
     vendors as admin_vendors,
+    product_images as admin_product_images,
 )
 from app.api.routes import (
     addresses,
@@ -48,6 +49,7 @@ api_router.include_router(addresses.router)
 api_router.include_router(wishlist.router)
 api_router.include_router(cart.router)
 api_router.include_router(orders.router)
+api_router.include_router(admin_product_images.router)
 
 # Admin API routes
 api_router.include_router(admin_dashboard.router)
@@ -62,3 +64,4 @@ api_router.include_router(admin_finance.router)
 api_router.include_router(admin_reports.router)
 api_router.include_router(admin_settings.router)
 api_router.include_router(admin_returns.router)
+api_router.include_router(admin_products.router)
