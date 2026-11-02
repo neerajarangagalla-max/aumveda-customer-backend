@@ -182,30 +182,41 @@ def update_product(
                     422, f"{field} cannot be null"
                 )
 
+                variants_payload = (
+            [
+                item.model_dump(mode="json")
+                for item in payload.variants
+            ]
+            if "variants" in payload.model_fields_set
+            else None
+        )
+
+        images_payload = (
+            [
+                item.model_dump(mode="json")
+                for item in payload.images
+            ]
+            if "images" in payload.model_fields_set
+            else None
+        )
+
+        print("========== PRODUCT UPDATE DEBUG ==========")
+        print("Product ID:", product_id)
+        print("Variants received:", variants_payload)
+        print("Variants field supplied:", "variants" in payload.model_fields_set)
+        print("==========================================")
+
         result = supabase.rpc(
             "admin_update_product",
             {
                 "p_product_id": str(product_id),
                 "p_changes": changes,
-                "p_variants": (
-                    [
-                        item.model_dump(mode="json")
-                        for item in payload.variants
-                    ]
-                    if "variants" in payload.model_fields_set
-                    else None
-                ),
-                "p_images": (
-                    [
-                        item.model_dump(mode="json")
-                        for item in payload.images
-                    ]
-                    if "images" in payload.model_fields_set
-                    else None
-                ),
+                "p_variants": variants_payload,
+                "p_images": images_payload,
             },
         ).execute()
 
+        print("RPC RESPONSE:", result.data)
         if not result.data:
             raise HTTPException(
                 500, "Product update returned no result"
