@@ -345,7 +345,38 @@ def get_orders(
             )
             variants = variants_response.data or []
 
-        # 6. Create lookup dictionaries.
+        # 6. Fetch product images and attach each product's primary image.
+        product_images = []
+        if product_ids:
+            images_response = (
+                supabase
+                .table("product_images")
+                .select("*")
+                .in_("product_id", product_ids)
+                .execute()
+            )
+            product_images = images_response.data or []
+
+        images_by_product_id = {}
+        for image in product_images:
+            product_id = str(image.get("product_id"))
+            images_by_product_id.setdefault(product_id, []).append(image)
+
+        for product in products:
+            images = images_by_product_id.get(str(product["id"]), [])
+            product["product_images"] = images
+
+            primary_image = next(
+                (image for image in images if image.get("is_primary")),
+                None,
+            )
+            if primary_image:
+                product["image_url"] = (
+                    primary_image.get("image_url")
+                    or primary_image.get("url")
+                )
+
+        # 7. Create lookup dictionaries.
         products_by_id = {
             product["id"]: product
             for product in products
@@ -356,7 +387,7 @@ def get_orders(
             for variant in variants
         }
 
-        # 7. Attach products and variants to each order item.
+        # 8. Attach products and variants to each order item.
         items_by_order = {}
 
         for item in order_items:
@@ -374,7 +405,7 @@ def get_orders(
 
             items_by_order[order_id].append(item)
 
-        # 8. Attach items to every order.
+        # 9. Attach items to every order.
         for order in orders:
             order["items"] = items_by_order.get(
                 order["id"], []
