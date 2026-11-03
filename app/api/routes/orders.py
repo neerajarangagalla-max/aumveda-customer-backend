@@ -513,6 +513,52 @@ def get_buy_again_products(
 
             variants = variants_response.data or []
 
+        # 5A. Fetch product images.
+        product_images = []
+
+        if product_ids:
+            images_response = (
+                supabase
+                .table("product_images")
+                .select("*")
+                .in_("product_id", product_ids)
+                .execute()
+            )
+
+            product_images = images_response.data or []
+
+        images_by_product_id = {}
+
+        for image in product_images:
+            product_id = str(image.get("product_id"))
+            images_by_product_id.setdefault(product_id, []).append(image)
+
+        # Attach images to each product.
+        for product in products:
+            product["product_images"] = images_by_product_id.get(
+                str(product["id"]),
+                [],
+            )
+            primary_image = next(
+                (
+                    image for image in product["product_images"]
+                    if image.get("is_primary")
+                ),
+                None,
+            )
+
+            if primary_image:
+                product["image_url"] = (
+                    primary_image.get("image_url")
+                    or primary_image.get("url")
+                )
+            elif product["product_images"]:
+                first_image = product["product_images"][0]
+                product["image_url"] = (
+                    first_image.get("image_url")
+                    or first_image.get("url")
+                )
+
         products_by_id = {
             str(product["id"]): product
             for product in products
