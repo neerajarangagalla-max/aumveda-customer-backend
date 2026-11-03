@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.core.supabase import supabase
-import logging
+from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -339,4 +341,79 @@ def get_product_by_slug(slug: str):
         raise HTTPException(
             status_code=404,
             detail="Product not found"
+        )
+# ============================================================
+# RECORD RECENTLY VIEWED PRODUCT
+# ============================================================
+
+@router.post("/{product_id}/view")
+def track_product_view(
+    product_id: str,
+    user=Depends(get_current_user),
+):
+    try:
+        product_response = (
+            supabase
+            .table("products")
+            .select("id")
+            .eq("id", product_id)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+
+        if not product_response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found.",
+            )
+
+        result = record_product_view(
+            customer_id=str(user.id),
+            product_id=product_id,
+        )
+
+        return {
+            "status": "success",
+            "message": "Product view recorded.",
+            "data": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unable to record product view")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to record product view.",
+        )
+
+
+# ============================================================
+# GET RECENTLY VIEWED PRODUCTS
+# ============================================================
+
+@router.get("/recently-viewed")
+def recently_viewed_products(
+    limit: int = 10,
+    user=Depends(get_current_user),
+):
+    try:
+        limit = max(1, min(limit, 20))
+
+        products = get_recently_viewed_products(
+            customer_id=str(user.id),
+            limit=limit,
+        )
+
+        return {
+            "status": "success",
+            "data": products,
+        }
+
+    except Exception:
+        logger.exception("Unable to retrieve recently viewed products")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve recently viewed products.",
         )
