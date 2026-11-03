@@ -583,3 +583,174 @@ def get_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load order details. Please try again.",
         )
+
+# ============================================================
+# BUY AGAIN - PREVIOUSLY PURCHASED PRODUCTS
+# ============================================================
+
+@router.get("/buy-again")
+def get_buy_again_products(
+    customer_id: str = Depends(get_current_customer_id),
+):
+    try:
+        # 1. Get delivered orders belonging to this customer.
+        orders_response = (
+            supabase
+            .table("orders")
+            .select("id, created_at")
+            .eq("customer_id", customer_id)
+            .eq("status", "delivered")
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        orders = orders_response.data or []
+
+        if not orders:
+            return {
+                "status": "success",
+                "count": 0,
+                "data": [],
+            }
+
+        order_ids = [order["id"] for order in orders]
+
+        # 2. Get items from delivered orders.
+        items_response = (
+            supabase
+            .table("order_items")
+            .select(
+                "id, order_id, product_id, variant_id, "
+                "product_name, variant_name, quantity, "
+                "unit_price, total_price, created_at"
+            )
+            .in_("order_id", order_ids)
+            .execute()
+        )
+
+        order_items = items_response.data or []
+
+        if not order_items:
+            return {
+                "status": "success",
+                "count": 0,
+                "data": [],
+            }
+
+        # 3. Collect product and variant IDs.
+        product_ids = list({
+            item["product_id"]
+            for item in order_items
+            if item.get("product_id")
+        })
+
+        variant_ids = list({
+            item["variant_id"]
+            for item in order_items
+            if item.get("variant_id")
+        })
+
+        # 4. Fetch current product details.
+        products = []
+
+        if product_ids:
+            products_response = (
+                supabase
+                .table("products")
+                .select("*")
+                .in_("id", product_ids)
+                .execute()
+            )
+
+            products = products_response.data or []
+
+        # 5. Fetch current variant details.
+        variants = []
+
+        if variant_ids:
+            variants_response = (
+                supabase
+                .table("product_variants")
+                .select("*")
+                .in_("id", variant_ids)
+                .execute()
+            )
+
+            variants = variants_response.data or []
+
+        products_by_id = {
+            str(product["id"]): product
+            for product in products
+        }
+
+        variants_by_id = {
+            str(variant["id"]): variant
+            for variant in variants
+        }
+
+        # 6. Combine previous purchase information.
+        buy_again = {}
+
+        for item in order_items:
+            product_id = item.get("product_id")
+
+            if not product_id:
+                continue
+
+            product = products_by_id.get(str(product_id))
+
+            # Skip products that are no longer available in the catalogue.
+            if not product:
+                continue
+
+            variant = variants_by_id.get(
+                str(item.get("variant_id"))
+            )
+
+            key = (
+                f"{product_id}:"
+                f"{item.get('variant_id') or 'default'}"
+            )
+
+            if key not in buy_again:
+                buy_again[key] = {
+                    "product": product,
+                    "variant": variant,
+                    "last_purchased_at": item.get("created_at"),
+                    "last_order_id": item.get("order_id"),
+                    "total_quantity_purchased": 0,
+                    "purchase_count": 0,
+                    "last_purchase_price": item.get("unit_price"),
+                }
+
+            buy_again[key]["total_quantity_purchased"] += (
+                item.get("quantity") or 0
+            )
+
+            buy_again[key]["purchase_count"] += 1
+
+        # 7. Return latest purchases first.
+        results = sorted(
+            buy_again.values(),
+            key=lambda item: item.get("last_purchased_at") or "",
+            reverse=True,
+        )
+
+        return {
+            "status": "success",
+            "count": len(results),
+            "data": results,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        logger.exception(
+            "Failed to load Buy Again products"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load previously purchased products.",
+        )
