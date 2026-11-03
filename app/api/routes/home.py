@@ -1,6 +1,7 @@
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.supabase import supabase
 
@@ -315,10 +316,13 @@ async def get_shop_by_concern():
         )
 
 @router.get("/coupons")
-async def get_home_coupons():
+async def get_home_coupons(
+    placement: str = Query(
+        default="home",
+        pattern="^(home|cart|checkout|product_details)$",
+    ),
+):
     try:
-        from datetime import datetime, timezone
-
         now = datetime.now(timezone.utc).isoformat()
 
         response = (
@@ -335,10 +339,12 @@ async def get_home_coupons():
                 max_discount_amount,
                 starts_at,
                 expires_at,
-                first_order_only
+                first_order_only,
+                display_locations
                 """
             )
             .eq("is_active", True)
+            .contains("display_locations", [placement])
             .lte("starts_at", now)
             .gt("expires_at", now)
             .order("created_at", desc=True)

@@ -39,6 +39,9 @@ class CouponCreate(BaseModel):
 
     first_order_only: bool = False
     is_active: bool = True
+    display_locations: list[
+        Literal["home", "cart", "checkout", "product_details"]
+    ] = Field(default_factory=list)
 
     @field_validator("code")
     @classmethod
@@ -84,6 +87,9 @@ class CouponUpdate(BaseModel):
 
     first_order_only: bool | None = None
     is_active: bool | None = None
+    display_locations: list[
+        Literal["home", "cart", "checkout", "product_details"]
+    ] | None = None
 
     @field_validator("code")
     @classmethod
