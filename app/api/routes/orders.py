@@ -676,7 +676,7 @@ def get_order(
     try:
         logger.info("GET ORDER: Fetching order %s", order_id)
 
-        response = (
+        response = execute_supabase_read(
             supabase
             .table("orders")
             .select(
@@ -704,7 +704,6 @@ def get_order(
             .eq("id", str(order_id))
             .eq("customer_id", customer_id)
             .limit(1)
-            .execute()
         )
 
         logger.info("GET ORDER: Order query succeeded")
@@ -721,12 +720,11 @@ def get_order(
 
         logger.info("GET ORDER: Fetching order items")
 
-        items_response = (
+        items_response = execute_supabase_read(
             supabase
             .table("order_items")
             .select("*")
             .eq("order_id", str(order_id))
-            .execute()
         )
 
         order_items = items_response.data or []
@@ -753,12 +751,11 @@ def get_order(
         if product_ids:
             logger.info("GET ORDER: Fetching products")
 
-            products_response = (
+            products_response = execute_supabase_read(
                 supabase
                 .table("products")
                 .select("*, product_images(*)")
                 .in_("id", product_ids)
-                .execute()
             )
 
             products = products_response.data or []
