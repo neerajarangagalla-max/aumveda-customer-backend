@@ -800,10 +800,30 @@ def get_order(
         }
 
         for item in order_items:
-            item["product"] = products_by_id.get(
-                str(item.get("product_id"))
-            )
+            product = products_by_id.get(str(item.get("product_id")))
+            if product:
+                product_images = product.get("product_images") or []
+                primary_image = next(
+                    (
+                        image for image in product_images
+                        if image.get("is_primary") is True
+                    ),
+                    None,
+                )
+                selected_image = primary_image or (
+                    product_images[0] if product_images else None
+                )
+                image_url = (
+                    selected_image.get("image_url")
+                    if selected_image
+                    else None
+                )
+                product["image_url"] = image_url
+                item["image_url"] = image_url
+            else:
+                item["image_url"] = None
 
+            item["product"] = product
             item["variant"] = variants_by_id.get(
                 str(item.get("variant_id"))
             )
