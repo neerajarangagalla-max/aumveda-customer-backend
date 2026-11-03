@@ -162,6 +162,7 @@ def create_product(payload: AdminProductCreate):
         raise _database_error(exc) from exc
 
 
+
 @router.patch("/{product_id}")
 def update_product(
     product_id: UUID,
@@ -182,7 +183,8 @@ def update_product(
                     422, f"{field} cannot be null"
                 )
 
-                variants_payload = (
+        # Prepare variants and images BEFORE using them
+        variants_payload = (
             [
                 item.model_dump(mode="json")
                 for item in payload.variants
@@ -203,7 +205,10 @@ def update_product(
         print("========== PRODUCT UPDATE DEBUG ==========")
         print("Product ID:", product_id)
         print("Variants received:", variants_payload)
-        print("Variants field supplied:", "variants" in payload.model_fields_set)
+        print(
+            "Variants field supplied:",
+            "variants" in payload.model_fields_set
+        )
         print("==========================================")
 
         result = supabase.rpc(
@@ -217,6 +222,7 @@ def update_product(
         ).execute()
 
         print("RPC RESPONSE:", result.data)
+
         if not result.data:
             raise HTTPException(
                 500, "Product update returned no result"
@@ -226,10 +232,12 @@ def update_product(
             "message": "Product updated successfully",
             **result.data,
         }
+
     except HTTPException:
         raise
     except Exception as exc:
         raise _database_error(exc) from exc
+
 
 
 @router.patch("/{product_id}/status")
