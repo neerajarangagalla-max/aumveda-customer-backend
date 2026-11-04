@@ -473,3 +473,43 @@ async def get_new_arrivals():
             status_code=500,
             detail="Unable to retrieve new arrivals",
         )
+@router.get("/category-campaigns")
+async def get_category_campaigns():
+    try:
+        response = (
+            supabase
+            .table("category_campaigns")
+            .select(
+                """
+                id,
+                title,
+                image_url,
+                category_id,
+                sort_order,
+                categories(
+                    id,
+                    name,
+                    slug
+                )
+                """
+            )
+            .eq("is_active", True)
+            .order("sort_order")
+            .execute()
+        )
+
+        campaigns = response.data or []
+
+        return {
+            "status": "success",
+            "count": len(campaigns),
+            "data": campaigns,
+        }
+
+    except Exception:
+        logger.exception("Category campaigns API failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve category campaigns",
+        )
