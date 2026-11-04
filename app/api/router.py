@@ -16,6 +16,7 @@ from app.api.admin import (
     vendors as admin_vendors,
     product_images as admin_product_images,
     coupons as admin_coupons,
+    notifications as admin_notifications,
 )
 from app.api.routes import (
     addresses,
@@ -68,3 +69,4 @@ api_router.include_router(admin_settings.router)
 api_router.include_router(admin_returns.router)
 api_router.include_router(admin_products.router)
 api_router.include_router(admin_coupons.router)
+api_router.include_router(admin_notifications.router)

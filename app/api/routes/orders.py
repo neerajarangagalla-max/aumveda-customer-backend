@@ -204,6 +204,7 @@ def create_order(
                     detail="Unable to create order. Please try again.",
                     )
             order = order[0]
+        create_admin_order_notification(order)
 
         return {
             "status": "success",
@@ -847,4 +848,58 @@ def get_order(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load order details. Please try again.",
+        )
+# ============================================================
+# CREATE ADMIN NOTIFICATION
+# ============================================================
+
+def create_admin_order_notification(order: dict):
+    try:
+        # Get all active admin accounts.
+        admins_response = (
+            supabase
+            .table("profiles")
+            .select("id")
+            .eq("role", "admin")
+            .eq("is_active", True)
+            .execute()
+        )
+
+        admins = admins_response.data or []
+
+        if not admins:
+            logger.warning("No active admin accounts found for order notification.")
+            return
+
+        order_id = order.get("id")
+        order_number = order.get("order_number") or str(order_id)
+
+        notifications = []
+
+        for admin in admins:
+            notifications.append({
+                "recipient_id": admin["id"],
+                "recipient_role": "admin",
+                "title": "New Order Received",
+                "message": f"New order {order_number} has been placed.",
+                "notification_type": "new_order",
+                "reference_type": "order",
+                "reference_id": order_id,
+                "is_read": False,
+            })
+
+        if notifications:
+            supabase.table("notifications").insert(
+                notifications
+            ).execute()
+
+            logger.info(
+                "Admin order notification created for order %s",
+                order_number,
+            )
+
+    except Exception:
+        # Notification failure must not interrupt order creation.
+        logger.exception(
+            "Failed to create admin notification for new order."
         )
