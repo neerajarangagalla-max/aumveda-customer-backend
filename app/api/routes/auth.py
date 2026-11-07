@@ -1,7 +1,7 @@
 import logging
 from app.core.config import settings
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from app.core.supabase import supabase_admin, supabase_auth
 from app.core.security import get_current_user
 
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuthRequest(BaseModel):
+        name: str = Field(..., min_length=1, max_length=255)
         email: EmailStr
         password: str
 
@@ -35,6 +36,13 @@ class ResetPasswordRequest(BaseModel):
 async def register_user(payload: AuthRequest):
 
         try:
+            full_name = payload.name.strip()
+            if not full_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Name is required.",
+                )
+
             if len(payload.password) < 6:
                 raise HTTPException(
                     status_code=400,
@@ -45,6 +53,11 @@ async def register_user(payload: AuthRequest):
                 {
                     "email": payload.email,
                     "password": payload.password,
+                    "options": {
+                        "data": {
+                            "full_name": full_name,
+                        },
+                    },
                 }
             )
 
@@ -54,12 +67,27 @@ async def register_user(payload: AuthRequest):
                     detail="Unable to create account.",
                 )
 
+            (
+                supabase_admin.table("profiles")
+                .upsert(
+                    {
+                        "id": str(response.user.id),
+                        "email": str(payload.email).lower().strip(),
+                        "full_name": full_name,
+                        "role": "customer",
+                    },
+                    on_conflict="id",
+                )
+                .execute()
+            )
+
             return {
                 "status": "success",
                 "message": "Account created successfully.",
                 "user": {
                     "id": response.user.id,
                     "email": response.user.email,
+                    "full_name": full_name,
                 },
                 "access_token": (
                     response.session.access_token

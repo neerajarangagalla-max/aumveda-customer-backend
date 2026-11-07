@@ -17,6 +17,9 @@ from app.api.admin import (
     product_images as admin_product_images,
     coupons as admin_coupons,
     notifications as admin_notifications,
+    support as admin_support,
+    
+    
 )
 from app.api.routes import (
     addresses,
@@ -32,6 +35,7 @@ from app.api.routes import (
     returns,
     reviews,
     wishlist,
+    support,
     
 )
 
@@ -53,6 +57,7 @@ api_router.include_router(wishlist.router)
 api_router.include_router(cart.router)
 api_router.include_router(orders.router)
 api_router.include_router(admin_product_images.router)
+api_router.include_router(support.router)
 
 # Admin API routes
 api_router.include_router(admin_dashboard.router)
@@ -67,6 +72,6 @@ api_router.include_router(admin_finance.router)
 api_router.include_router(admin_reports.router)
 api_router.include_router(admin_settings.router)
 api_router.include_router(admin_returns.router)
-api_router.include_router(admin_products.router)
 api_router.include_router(admin_coupons.router)
 api_router.include_router(admin_notifications.router)
+api_router.include_router(admin_support.router)
