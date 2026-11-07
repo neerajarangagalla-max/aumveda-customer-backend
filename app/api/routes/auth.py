@@ -13,8 +13,13 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
-class AuthRequest(BaseModel):
+class RegisterRequest(BaseModel):
         name: str = Field(..., min_length=1, max_length=255)
+        email: EmailStr
+        password: str
+
+
+class LoginRequest(BaseModel):
         email: EmailStr
         password: str
 
@@ -33,7 +38,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 @router.post("/register")
-async def register_user(payload: AuthRequest):
+async def register_user(payload: RegisterRequest):
 
         try:
             full_name = payload.name.strip()
@@ -112,7 +117,7 @@ async def register_user(payload: AuthRequest):
 
 
 @router.post("/login")
-async def login_user(payload: AuthRequest):
+async def login_user(payload: LoginRequest):
 
         try:
             response = (
