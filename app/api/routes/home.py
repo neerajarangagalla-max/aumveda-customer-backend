@@ -471,6 +471,33 @@ async def get_new_arrivals():
             detail="Unable to retrieve new arrivals",
         )
 
+@router.get("/app-banners")
+async def get_app_banners():
+    try:
+        response = (
+            supabase
+            .table("banners")
+            .select("*")
+            .eq("platform", "app")
+            .eq("placement", "home")
+            .eq("is_visible", True)
+            .eq("publish_status", "published")
+            .order("sort_order", desc=False)
+            .execute()
+        )
+
+        return {
+            "status": "success",
+            "count": len(response.data or []),
+            "data": response.data or [],
+        }
+
+    except Exception:
+        logger.exception("App banners API failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve app banners",
+        )
 
 @router.get("/category-banners")
 async def get_category_banners():
