@@ -23,20 +23,42 @@ router = APIRouter(
 )
 
 
+# =========================================================
+# APP PROMOTIONAL BANNERS
+# =========================================================
+
 @router.get("")
 def list_banners(
     publish_status: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
+    placement: str | None = Query(default=None),
 ):
+    """
+    List app promotional banners.
+
+    App promotional banners are stored in the `banners` table
+    with:
+        platform = app
+        placement = home
+    """
+
     try:
         query = (
             supabase
-            .table("homepage_items")
+            .table("banners")
             .select("*", count="exact")
-            .eq("item_type", "app_banner")
+            .eq("platform", "app")
+            .eq("placement", "home")
         )
 
         if publish_status:
             query = query.eq("publish_status", publish_status)
+
+        if platform:
+            query = query.eq("platform", platform)
+
+        if placement:
+            query = query.eq("placement", placement)
 
         result = (
             query
@@ -68,6 +90,13 @@ async def create_banner(
     starts_at: str | None = Form(None),
     ends_at: str | None = Form(None),
 ):
+    """
+    Create an app promotional banner.
+
+    The banner is stored in the same `banners` table used by
+    the customer `/home/app-banners` API.
+    """
+
     try:
         # ---------------------------------------------------------
         # 1. Validate image type
@@ -96,17 +125,17 @@ async def create_banner(
             )
 
         # ---------------------------------------------------------
-        # 3. Validate image dimensions
+        # 3. Validate image
         # ---------------------------------------------------------
         try:
             img = Image.open(BytesIO(file_bytes))
             width, height = img.size
 
-        except Exception:
+        except Exception as exc:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid image file",
-            )
+            ) from exc
 
         if height == 0:
             raise HTTPException(
@@ -126,28 +155,7 @@ async def create_banner(
             )
 
         # ---------------------------------------------------------
-        # 5. Find homepage section dynamically
-        # ---------------------------------------------------------
-        section_result = (
-            supabase
-            .table("homepage_sections")
-            .select("id")
-            .eq("section_key", "hero_banner")
-            .eq("section_type", "hero_carousel")
-            .single()
-            .execute()
-        )
-
-        if not section_result.data:
-            raise HTTPException(
-                status_code=400,
-                detail="Hero banner section not found",
-            )
-
-        section_id = section_result.data["id"]
-
-        # ---------------------------------------------------------
-        # 6. Generate storage filename
+        # 5. Generate storage filename
         # ---------------------------------------------------------
         extension = (
             image.filename.split(".")[-1].lower()
@@ -160,7 +168,7 @@ async def create_banner(
         storage_path = f"banners/app/{file_name}"
 
         # ---------------------------------------------------------
-        # 7. Upload image to existing Supabase bucket
+        # 6. Upload image to Supabase Storage
         # ---------------------------------------------------------
         supabase.storage.from_("site_assets").upload(
             storage_path,
@@ -172,7 +180,7 @@ async def create_banner(
         )
 
         # ---------------------------------------------------------
-        # 8. Get public image URL
+        # 7. Get public image URL
         # ---------------------------------------------------------
         image_url = (
             supabase
@@ -182,20 +190,31 @@ async def create_banner(
         )
 
         # ---------------------------------------------------------
-        # 9. Prepare homepage item
+        # 8. Prepare banner data
         # ---------------------------------------------------------
         banner_data = {
-            "section_id": section_id,
-            "item_key": f"app_banner_{uuid4().hex[:8]}",
-            "item_type": "app_banner",
+            # IMPORTANT:
+            # Customer /home/app-banners reads these values.
+            "platform": "app",
+            "placement": "home",
+
             "title": display_location,
             "image_url": image_url,
-            "alt_text": display_location,
+            "storage_path": storage_path,
+
+            # App promotional banners do not target a category.
+            "target_type": "home",
+            "target_id": None,
+            "category_id": None,
+
             "sort_order": display_order,
+
             "is_visible": publish_status == "published",
             "publish_status": publish_status,
+
             "starts_at": starts_at or None,
             "ends_at": ends_at or None,
+
             "metadata": {
                 "display_location": display_location,
                 "aspect_ratio": "7:3",
@@ -203,17 +222,17 @@ async def create_banner(
         }
 
         # ---------------------------------------------------------
-        # 10. Insert banner into homepage_items
+        # 9. Insert into banners table
         # ---------------------------------------------------------
         result = (
             supabase
-            .table("homepage_items")
+            .table("banners")
             .insert(banner_data)
             .execute()
         )
 
         # ---------------------------------------------------------
-        # 11. Return created banner
+        # 10. Return created banner
         # ---------------------------------------------------------
         return {
             "message": "App banner created successfully",
@@ -230,6 +249,12 @@ async def create_banner(
             status_code=500,
             detail=str(exc),
         ) from exc
+
+
+# =========================================================
+# CATEGORY BANNERS
+# =========================================================
+
 @router.get("/category")
 def list_category_banners(
     category_id: str | None = Query(default=None),
@@ -274,6 +299,7 @@ def list_category_banners(
 
     except Exception as exc:
         print("CATEGORY BANNER LIST ERROR:", repr(exc))
+
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve category banners",
@@ -290,6 +316,9 @@ async def create_category_banner(
     ends_at: str | None = Form(None),
 ):
     try:
+        # ---------------------------------------------------------
+        # 1. Validate image type
+        # ---------------------------------------------------------
         allowed_types = {
             "image/jpeg",
             "image/png",
@@ -302,7 +331,9 @@ async def create_category_banner(
                 detail="Only JPG, PNG, and WEBP images are allowed",
             )
 
-        # Verify category exists
+        # ---------------------------------------------------------
+        # 2. Verify category exists
+        # ---------------------------------------------------------
         category_result = (
             supabase
             .table("categories")
@@ -320,6 +351,9 @@ async def create_category_banner(
 
         category = category_result.data
 
+        # ---------------------------------------------------------
+        # 3. Read image
+        # ---------------------------------------------------------
         file_bytes = await image.read()
 
         if not file_bytes:
@@ -328,15 +362,18 @@ async def create_category_banner(
                 detail="Banner image is empty",
             )
 
-        # Validate image
+        # ---------------------------------------------------------
+        # 4. Validate image dimensions
+        # ---------------------------------------------------------
         try:
             img = Image.open(BytesIO(file_bytes))
             width, height = img.size
-        except Exception:
+
+        except Exception as exc:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid image file",
-            )
+            ) from exc
 
         if height == 0:
             raise HTTPException(
@@ -344,14 +381,20 @@ async def create_category_banner(
                 detail="Invalid image dimensions",
             )
 
+        # ---------------------------------------------------------
+        # 5. Validate 3:1 aspect ratio
+        # ---------------------------------------------------------
         ratio = width / height
 
         if abs(ratio - 3.0) > 0.03:
             raise HTTPException(
                 status_code=400,
                 detail="Category banner must use a 3:1 aspect ratio",
-                )
+            )
 
+        # ---------------------------------------------------------
+        # 6. Generate storage filename
+        # ---------------------------------------------------------
         extension = (
             image.filename.split(".")[-1].lower()
             if image.filename and "." in image.filename
@@ -359,9 +402,12 @@ async def create_category_banner(
         )
 
         file_name = f"{uuid4()}.{extension}"
+
         storage_path = f"banners/app/category/{file_name}"
 
-        # Upload image
+        # ---------------------------------------------------------
+        # 7. Upload image
+        # ---------------------------------------------------------
         supabase.storage.from_("site_assets").upload(
             storage_path,
             file_bytes,
@@ -371,32 +417,49 @@ async def create_category_banner(
             },
         )
 
+        # ---------------------------------------------------------
+        # 8. Get public URL
+        # ---------------------------------------------------------
         image_url = (
-            supabase.storage
+            supabase
+            .storage
             .from_("site_assets")
             .get_public_url(storage_path)
         )
 
+        # ---------------------------------------------------------
+        # 9. Prepare category banner data
+        # ---------------------------------------------------------
         banner_data = {
             "platform": "app",
             "placement": "category",
+
             "category_id": category_id,
+
             "title": category["name"],
             "image_url": image_url,
             "storage_path": storage_path,
+
             "target_type": "category",
             "target_id": category_id,
+
             "sort_order": display_order,
+
             "is_visible": publish_status == "published",
             "publish_status": publish_status,
+
             "starts_at": starts_at or None,
             "ends_at": ends_at or None,
+
             "metadata": {
-                "aspect_ratio": "7:3",
+                "aspect_ratio": "3:1",
                 "category_id": category_id,
             },
         }
 
+        # ---------------------------------------------------------
+        # 10. Insert into banners table
+        # ---------------------------------------------------------
         result = (
             supabase
             .table("banners")
@@ -404,6 +467,9 @@ async def create_category_banner(
             .execute()
         )
 
+        # ---------------------------------------------------------
+        # 11. Return created banner
+        # ---------------------------------------------------------
         return {
             "message": "Category banner created successfully",
             "item": result.data[0] if result.data else None,
@@ -414,6 +480,7 @@ async def create_category_banner(
 
     except Exception as exc:
         print("CATEGORY BANNER CREATE ERROR:", repr(exc))
+
         raise HTTPException(
             status_code=500,
             detail=str(exc),
