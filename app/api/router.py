@@ -1,7 +1,7 @@
-
 from fastapi import APIRouter
 
 from app.api.admin import (
+    banners as admin_banners,
     categories as admin_categories,
     customers as admin_customers,
     dashboard as admin_dashboard,
@@ -18,9 +18,8 @@ from app.api.admin import (
     coupons as admin_coupons,
     notifications as admin_notifications,
     support as admin_support,
-    
-    
 )
+
 from app.api.routes import (
     addresses,
     auth,
@@ -36,13 +35,16 @@ from app.api.routes import (
     reviews,
     wishlist,
     support,
-    
 )
 
 
 api_router = APIRouter()
 
+
+# ============================================================
 # Customer API routes
+# ============================================================
+
 api_router.include_router(health.router)
 api_router.include_router(returns.router)
 api_router.include_router(reviews.router)
@@ -59,8 +61,13 @@ api_router.include_router(orders.router)
 api_router.include_router(admin_product_images.router)
 api_router.include_router(support.router)
 
+
+# ============================================================
 # Admin API routes
+# ============================================================
+
 api_router.include_router(admin_dashboard.router)
+api_router.include_router(admin_banners.router)
 api_router.include_router(admin_vendors.router)
 api_router.include_router(admin_products.router)
 api_router.include_router(admin_categories.router)

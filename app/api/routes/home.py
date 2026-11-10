@@ -50,7 +50,68 @@ async def get_home_categories():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve homepage categories",
         )
+@router.get("/app-banners")
+async def get_app_banners():
+    try:
+        now = datetime.now(timezone.utc).isoformat()
 
+        response = (
+            supabase
+            .table("homepage_items")
+            .select(
+                """
+                id,
+                section_id,
+                item_key,
+                item_type,
+                title,
+                subtitle,
+                description,
+                eyebrow,
+                image_url,
+                mobile_image_url,
+                video_url,
+                alt_text,
+                badge_text,
+                badge_style,
+                primary_cta_text,
+                primary_cta_url,
+                secondary_cta_text,
+                secondary_cta_url,
+                target_type,
+                target_id,
+                target_url,
+                sort_order,
+                is_visible,
+                publish_status,
+                style_config,
+                metadata,
+                starts_at,
+                ends_at
+                """
+            )
+            .eq("item_type", "app_banner")
+            .eq("is_visible", True)
+            .eq("publish_status", "published")
+            .or_(f"starts_at.is.null,starts_at.lte.{now}")
+            .or_(f"ends_at.is.null,ends_at.gt.{now}")
+            .order("sort_order")
+            .execute()
+        )
+
+        return {
+            "status": "success",
+            "count": len(response.data or []),
+            "data": response.data or [],
+        }
+
+    except Exception:
+        logger.exception("App banners API failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve app banners",
+        )
 @router.get("/featured-products")
 async def get_featured_products():
     try:
