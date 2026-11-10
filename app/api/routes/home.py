@@ -14,8 +14,6 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
-
-
 @router.get("/categories")
 async def get_home_categories():
     try:
@@ -50,68 +48,8 @@ async def get_home_categories():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve homepage categories",
         )
-@router.get("/app-banners")
-async def get_app_banners():
-    try:
-        now = datetime.now(timezone.utc).isoformat()
 
-        response = (
-            supabase
-            .table("homepage_items")
-            .select(
-                """
-                id,
-                section_id,
-                item_key,
-                item_type,
-                title,
-                subtitle,
-                description,
-                eyebrow,
-                image_url,
-                mobile_image_url,
-                video_url,
-                alt_text,
-                badge_text,
-                badge_style,
-                primary_cta_text,
-                primary_cta_url,
-                secondary_cta_text,
-                secondary_cta_url,
-                target_type,
-                target_id,
-                target_url,
-                sort_order,
-                is_visible,
-                publish_status,
-                style_config,
-                metadata,
-                starts_at,
-                ends_at
-                """
-            )
-            .eq("item_type", "app_banner")
-            .eq("is_visible", True)
-            .eq("publish_status", "published")
-            .or_(f"starts_at.is.null,starts_at.lte.{now}")
-            .or_(f"ends_at.is.null,ends_at.gt.{now}")
-            .order("sort_order")
-            .execute()
-        )
 
-        return {
-            "status": "success",
-            "count": len(response.data or []),
-            "data": response.data or [],
-        }
-
-    except Exception:
-        logger.exception("App banners API failed")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to retrieve app banners",
-        )
 @router.get("/featured-products")
 async def get_featured_products():
     try:
@@ -155,7 +93,6 @@ async def get_featured_products():
             variants = product.get("product_variants") or []
             images = product.get("product_images") or []
 
-            # Prefer the default variant stored in attributes.
             default_variant = next(
                 (
                     variant
@@ -167,7 +104,6 @@ async def get_featured_products():
                 None,
             )
 
-            # Fall back to the first available variant.
             if default_variant is None and variants:
                 default_variant = variants[0]
 
@@ -213,10 +149,12 @@ async def get_featured_products():
 
     except Exception:
         logger.exception("Featured products API failed")
+
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve featured products",
         )
+
 
 @router.get("/bundles")
 async def get_home_bundles():
@@ -252,15 +190,16 @@ async def get_home_bundles():
 
     except Exception:
         logger.exception("Failed to retrieve homepage bundles")
+
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve homepage bundles",
         )
 
+
 @router.get("/shop-by-concern")
 async def get_shop_by_concern():
     try:
-        # Fetch all active subcategories
         categories_response = (
             supabase
             .table("categories")
@@ -269,7 +208,6 @@ async def get_shop_by_concern():
             .execute()
         )
 
-        # Prepare all active subcategories, including those with zero sales
         subcategory_sales = {}
 
         for category in categories_response.data or []:
@@ -287,7 +225,6 @@ async def get_shop_by_concern():
                 "total_orders": set(),
             }
 
-        # Fetch delivered order items
         response = (
             supabase
             .table("order_items")
@@ -317,7 +254,6 @@ async def get_shop_by_concern():
             .execute()
         )
 
-        # Calculate sales for each subcategory
         for item in response.data or []:
             product = item.get("product") or {}
             category = product.get("category") or {}
@@ -338,7 +274,6 @@ async def get_shop_by_concern():
                     order["id"]
                 )
 
-        # Format and rank results
         results = []
 
         for category in subcategory_sales.values():
@@ -359,7 +294,6 @@ async def get_shop_by_concern():
             )
         )
 
-        # Return top 20 subcategories
         results = results[:20]
 
         return {
@@ -375,6 +309,7 @@ async def get_shop_by_concern():
             status_code=500,
             detail="Unable to retrieve popular subcategories",
         )
+
 
 @router.get("/coupons")
 async def get_home_coupons(
@@ -428,43 +363,44 @@ async def get_home_coupons(
             detail="Unable to retrieve homepage coupons",
         )
 
+
 @router.get("/new-arrivals")
 async def get_new_arrivals():
     try:
         response = (
-    supabase
-    .table("products")
-    .select(
-        """
-        id,
-        name,
-        slug,
-        short_description,
-        average_rating,
-        review_count,
-        created_at,
-        product_variants(
-            id,
-            name,
-            price,
-            compare_at_price,
-            stock_quantity,
-            attributes
-        ),
-        product_images(
-            id,
-            image_url,
-            alt_text,
-            is_primary,
-            sort_order
+            supabase
+            .table("products")
+            .select(
+                """
+                id,
+                name,
+                slug,
+                short_description,
+                average_rating,
+                review_count,
+                created_at,
+                product_variants(
+                    id,
+                    name,
+                    price,
+                    compare_at_price,
+                    stock_quantity,
+                    attributes
+                ),
+                product_images(
+                    id,
+                    image_url,
+                    alt_text,
+                    is_primary,
+                    sort_order
+                )
+                """
+            )
+            .eq("status", "active")
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
         )
-        """
-    )
-    .eq("status", "active")
-    .order("created_at", desc=True)
-    .limit(10)
-    .execute()
-)
 
         products = []
 
@@ -534,6 +470,83 @@ async def get_new_arrivals():
             status_code=500,
             detail="Unable to retrieve new arrivals",
         )
+
+
+@router.get("/category-banners")
+async def get_category_banners():
+    """
+    Get active category banners for the customer mobile app.
+
+    Only banners that are:
+    - platform = app
+    - placement = category
+    - visible
+    - published
+    - within their scheduled publish window
+
+    are returned.
+    """
+
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+
+        response = (
+            supabase
+            .table("banners")
+            .select(
+                """
+                id,
+                category_id,
+                title,
+                subtitle,
+                image_url,
+                mobile_image_url,
+                target_type,
+                target_id,
+                target_url,
+                sort_order,
+                metadata,
+                starts_at,
+                ends_at,
+                categories(
+                    id,
+                    name,
+                    slug
+                )
+                """
+            )
+            .eq("platform", "app")
+            .eq("placement", "category")
+            .eq("is_visible", True)
+            .eq("publish_status", "published")
+            .or_(
+                f"starts_at.is.null,starts_at.lte.{now}"
+            )
+            .or_(
+                f"ends_at.is.null,ends_at.gt.{now}"
+            )
+            .order("sort_order", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        banners = response.data or []
+
+        return {
+            "status": "success",
+            "count": len(banners),
+            "data": banners,
+        }
+
+    except Exception:
+        logger.exception("Category banners API failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve category banners",
+        )
+
+
 @router.get("/category-campaigns")
 async def get_category_campaigns():
     try:
