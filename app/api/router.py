@@ -35,6 +35,7 @@ from app.api.routes import (
     reviews,
     wishlist,
     support,
+    site_settings,
 )
 
 
@@ -60,7 +61,7 @@ api_router.include_router(cart.router)
 api_router.include_router(orders.router)
 api_router.include_router(admin_product_images.router)
 api_router.include_router(support.router)
-
+api_router.include_router(site_settings.router)
 
 # ============================================================
 # Admin API routes
