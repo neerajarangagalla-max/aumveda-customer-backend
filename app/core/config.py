@@ -1,24 +1,21 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    # ---------------------------------------------------------
-    # APPLICATION
-    # ---------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BASE_DIR / ".env"
 
+
+class Settings(BaseSettings):
     app_name: str = "AUMVEDA Backend"
     app_env: str = "development"
 
     host: str = "0.0.0.0"
-    port: int = 5000
+    port: int = 8001
 
     api_v1_prefix: str = "/api/v1"
-
-    # ---------------------------------------------------------
-    # SUPABASE
-    # ---------------------------------------------------------
 
     supabase_url: str
 
@@ -26,19 +23,17 @@ class Settings(BaseSettings):
     supabase_secret_key: str | None = None
     supabase_service_role_key: str | None = None
 
-    # ---------------------------------------------------------
-    # FRONTEND / MOBILE
-    # ---------------------------------------------------------
-
     frontend_url: str = "http://localhost:5173"
     mobile_reset_url: str = "aumveda://reset-password"
 
-    # ---------------------------------------------------------
-    # CORS
-    # Configure origins through CORS_ORIGINS in .env and Render.
-    # ---------------------------------------------------------
-
     cors_origins: str = ""
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
     @property
     def allowed_origins(self) -> list[str]:
@@ -57,9 +52,7 @@ class Settings(BaseSettings):
     @property
     def admin_client_key(self) -> str:
         if not self.supabase_service_role_key:
-            raise ValueError(
-                "SUPABASE_SERVICE_ROLE_KEY is not configured"
-            )
+            raise ValueError("SUPABASE_SERVICE_ROLE_KEY is not configured")
         return self.supabase_service_role_key
 
 
