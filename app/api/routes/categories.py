@@ -1,4 +1,3 @@
-
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -24,6 +23,8 @@ CATEGORY_FIELDS = """
     sort_order
 """
 
+MAX_SUBCATEGORIES = 5
+
 
 @router.get("")
 async def categories():
@@ -48,20 +49,28 @@ async def categories():
 
             if parent_id:
                 subcategories_by_parent.setdefault(
-                    str(parent_id), []
+                    str(parent_id),
+                    []
                 ).append(item)
 
         parents = []
 
         for item in all_categories:
+            # Only include parent categories.
             if item.get("parent_id") is not None:
                 continue
 
+            parent_id = str(item["id"])
+
+            # Keep only the top 5 subcategories.
+            subcategories = subcategories_by_parent.get(
+                parent_id,
+                []
+            )[:MAX_SUBCATEGORIES]
+
             category = {
                 **item,
-                "subcategories": subcategories_by_parent.get(
-                    str(item["id"]), []
-                ),
+                "subcategories": subcategories,
             }
 
             parents.append(category)
@@ -104,19 +113,24 @@ async def category(slug: str):
 
         selected_category = data[0]
 
+        # Fetch active subcategories.
         children_response = (
             supabase_admin
             .table("categories")
             .select(CATEGORY_FIELDS)
-            .eq("parent_id", selected_category["id"])
+            .eq(
+                "parent_id",
+                selected_category["id"]
+            )
             .eq("is_active", True)
             .order("sort_order")
             .execute()
         )
 
+        # Keep only the top 5 subcategories.
         selected_category["subcategories"] = (
             children_response.data or []
-        )
+        )[:MAX_SUBCATEGORIES]
 
         return {
             "status": "success",

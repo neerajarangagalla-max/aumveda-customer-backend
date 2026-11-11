@@ -31,10 +31,6 @@ MAX_SECTION_PRODUCTS = 100
 
 
 def parse_datetime(value):
-    """
-    Safely parse a datetime value and normalize it to UTC.
-    """
-
     if not value:
         return None
 
@@ -57,11 +53,6 @@ def parse_datetime(value):
 
 
 def is_published(record, now):
-    """
-    Check whether a homepage section/item is currently
-    published, visible and within its scheduled window.
-    """
-
     if record.get("publish_status") != "published":
         return False
 
@@ -74,7 +65,6 @@ def is_published(record, now):
     start = parse_datetime(start_raw)
     end = parse_datetime(end_raw)
 
-    # Invalid configured dates should not be published.
     if start_raw and start is None:
         return False
 
@@ -91,23 +81,10 @@ def is_published(record, now):
 
 
 def safe_object(value):
-    """
-    Return a dictionary when the supplied value is an object.
-    Otherwise return an empty dictionary.
-    """
-
-    return (
-        value
-        if isinstance(value, dict)
-        else {}
-    )
+    return value if isinstance(value, dict) else {}
 
 
 def safe_limit(value):
-    """
-    Keep homepage product limits within a safe range.
-    """
-
     try:
         return min(
             max(int(value), 1),
@@ -118,10 +95,6 @@ def safe_limit(value):
 
 
 def to_number(value):
-    """
-    Safely convert a value to float.
-    """
-
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -129,10 +102,6 @@ def to_number(value):
 
 
 def public_item(item):
-    """
-    Return only customer-safe homepage item fields.
-    """
-
     fields = (
         "id",
         "item_key",
@@ -176,7 +145,6 @@ def public_item(item):
 def selected_target_ids(items, target_type):
     """
     Preserve Admin-defined homepage item order.
-
     Duplicate selections are ignored.
     """
 
@@ -184,7 +152,6 @@ def selected_target_ids(items, target_type):
     result = []
 
     for item in items:
-
         if item.get("target_type") != target_type:
             continue
 
@@ -193,12 +160,10 @@ def selected_target_ids(items, target_type):
         if not target_id:
             continue
 
-        target_key = str(target_id)
-
-        if target_key in seen:
+        if target_id in seen:
             continue
 
-        seen.add(target_key)
+        seen.add(target_id)
         result.append(target_id)
 
     return result
@@ -210,8 +175,11 @@ def selected_target_ids(items, target_type):
 
 def resolve_categories(section, items):
     """
-    Resolve only explicitly selected active categories
+    Only explicitly selected active categories are shown
     for manual category sections.
+
+    This prevents unexpectedly showing every category
+    before Admin has configured the homepage.
     """
 
     category_ids = selected_target_ids(
@@ -226,13 +194,8 @@ def resolve_categories(section, items):
         supabase
         .table("categories")
         .select(
-            "id,"
-            "name,"
-            "slug,"
-            "description,"
-            "image_url,"
-            "parent_id,"
-            "sort_order"
+            "id,name,slug,description,image_url,"
+            "parent_id,sort_order"
         )
         .in_("id", category_ids)
         .eq("is_active", True)
@@ -247,7 +210,6 @@ def resolve_categories(section, items):
     result = []
 
     for category_id in category_ids:
-
         category = indexed.get(
             str(category_id)
         )
@@ -263,10 +225,6 @@ def resolve_categories(section, items):
 # ============================================================
 
 def load_product_variants(product_ids):
-    """
-    Load active variants for homepage products.
-    """
-
     if not product_ids:
         return {}
 
@@ -274,15 +232,9 @@ def load_product_variants(product_ids):
         supabase
         .table("product_variants")
         .select(
-            "id,"
-            "product_id,"
-            "sku,"
-            "name,"
-            "price,"
-            "compare_at_price,"
-            "stock_quantity,"
-            "attributes,"
-            "is_active"
+            "id,product_id,sku,name,price,"
+            "compare_at_price,stock_quantity,"
+            "attributes,is_active"
         )
         .in_("product_id", product_ids)
         .eq("is_active", True)
@@ -292,12 +244,11 @@ def load_product_variants(product_ids):
     grouped = {}
 
     for variant in response.data or []:
-
         if variant.get("price") is None:
             continue
 
         if to_number(
-            variant.get("price")
+            variant["price"]
         ) < 0:
             continue
 
@@ -310,10 +261,6 @@ def load_product_variants(product_ids):
 
 
 def load_product_images(product_ids):
-    """
-    Load product images for homepage products.
-    """
-
     if not product_ids:
         return {}
 
@@ -321,12 +268,8 @@ def load_product_images(product_ids):
         supabase
         .table("product_images")
         .select(
-            "id,"
-            "product_id,"
-            "image_url,"
-            "alt_text,"
-            "is_primary,"
-            "sort_order"
+            "id,product_id,image_url,alt_text,"
+            "is_primary,sort_order"
         )
         .in_("product_id", product_ids)
         .order("sort_order")
@@ -336,7 +279,6 @@ def load_product_images(product_ids):
     grouped = {}
 
     for image in response.data or []:
-
         grouped.setdefault(
             str(image["product_id"]),
             [],
@@ -349,19 +291,12 @@ def choose_variant(
     variants,
     require_discount=False,
 ):
-    """
-    Choose the best eligible variant.
-
-    Default variant is preferred.
-    """
-
     if not variants:
         return None
 
     eligible = []
 
     for variant in variants:
-
         price = to_number(
             variant.get("price")
         )
@@ -381,17 +316,15 @@ def choose_variant(
     if not eligible:
         return None
 
-    # Prefer Admin/catalogue default variant.
+    # Prefer the default variant.
     for variant in eligible:
-
         attributes = safe_object(
             variant.get("attributes")
         )
 
-        if (
-            attributes.get("is_default")
-            is True
-        ):
+        if attributes.get(
+            "is_default"
+        ) is True:
             return variant
 
     # Deterministic fallback.
@@ -409,11 +342,6 @@ def choose_variant(
 
 
 def choose_image(images):
-    """
-    Choose primary product image first,
-    then lowest sort order.
-    """
-
     if not images:
         return None
 
@@ -438,11 +366,6 @@ def serialize_product(
     variant,
     image,
 ):
-    """
-    Serialize the product using actual catalogue
-    variant/image/stock data.
-    """
-
     price = to_number(
         variant.get("price")
     )
@@ -465,9 +388,9 @@ def serialize_product(
     ):
         discount_percentage = round(
             (
-                (compare_price - price)
-                / compare_price
+                compare_price - price
             )
+            / compare_price
             * 100
         )
 
@@ -489,18 +412,12 @@ def serialize_product(
         "category_id": product.get(
             "category_id"
         ),
-        "rating": (
-            product.get(
-                "average_rating"
-            )
-            or 0
-        ),
-        "review_count": (
-            product.get(
-                "review_count"
-            )
-            or 0
-        ),
+        "rating": product.get(
+            "average_rating"
+        ) or 0,
+        "review_count": product.get(
+            "review_count"
+        ) or 0,
         "is_featured": bool(
             product.get(
                 "is_featured"
@@ -523,9 +440,7 @@ def serialize_product(
             else None
         ),
         "stock_quantity": stock_quantity,
-        "in_stock": (
-            stock_quantity > 0
-        ),
+        "in_stock": stock_quantity > 0,
     }
 
 
@@ -534,10 +449,10 @@ def fetch_product_candidates(
     items,
 ):
     """
-    Fetch eligible active products.
+    Fetch only eligible active products.
 
     Manual selections preserve Admin item order.
-    Automatic selections use existing catalogue flags.
+    Automatic selections use existing catalog flags.
     """
 
     mode = (
@@ -549,27 +464,16 @@ def fetch_product_candidates(
         supabase
         .table("products")
         .select(
-            "id,"
-            "name,"
-            "slug,"
-            "short_description,"
-            "category_id,"
-            "is_featured,"
-            "average_rating,"
-            "review_count,"
-            "created_at"
+            "id,name,slug,short_description,"
+            "category_id,is_featured,"
+            "average_rating,review_count,created_at"
         )
         .eq("status", "active")
     )
 
     manual_ids = []
 
-    # --------------------------------------------------------
-    # MANUAL
-    # --------------------------------------------------------
-
     if mode == "manual":
-
         manual_ids = selected_target_ids(
             items,
             "product",
@@ -583,23 +487,13 @@ def fetch_product_candidates(
             manual_ids,
         )
 
-    # --------------------------------------------------------
-    # FEATURED
-    # --------------------------------------------------------
-
     elif mode == "featured":
-
         query = query.eq(
             "is_featured",
             True,
         )
 
-    # --------------------------------------------------------
-    # CATEGORY
-    # --------------------------------------------------------
-
     elif mode == "category":
-
         category_id = section.get(
             "category_id"
         )
@@ -611,14 +505,8 @@ def fetch_product_candidates(
             supabase
             .table("categories")
             .select("id")
-            .eq(
-                "id",
-                category_id,
-            )
-            .eq(
-                "is_active",
-                True,
-            )
+            .eq("id", category_id)
+            .eq("is_active", True)
             .limit(1)
             .execute()
         )
@@ -631,10 +519,6 @@ def fetch_product_candidates(
             category_id,
         )
 
-    # --------------------------------------------------------
-    # DISCOUNTED / LATEST
-    # --------------------------------------------------------
-
     elif mode in (
         "discounted",
         "latest",
@@ -644,18 +528,12 @@ def fetch_product_candidates(
     else:
         return []
 
-    # --------------------------------------------------------
-    # MANUAL ORDER
-    # --------------------------------------------------------
-
     if mode == "manual":
-
         response = query.execute()
 
         indexed = {
             str(product["id"]): product
-            for product
-            in response.data or []
+            for product in response.data or []
         }
 
         return [
@@ -664,10 +542,6 @@ def fetch_product_candidates(
             if str(product_id)
             in indexed
         ]
-
-    # --------------------------------------------------------
-    # AUTOMATIC
-    # --------------------------------------------------------
 
     response = (
         query
@@ -687,10 +561,10 @@ def resolve_products(
     items,
 ):
     """
-    Resolve active products with their actual
-    catalogue variants, images, discounts and stock.
+    Resolve active products and their actual
+    catalog variants, images, discounts and stock.
 
-    Prices and stock are never copied from CMS items.
+    No prices or stock values are copied from CMS items.
     """
 
     candidates = fetch_product_candidates(
@@ -729,7 +603,6 @@ def resolve_products(
     products = []
 
     for product in candidates:
-
         product_id = str(
             product["id"]
         )
@@ -763,7 +636,6 @@ def resolve_products(
         )
 
     if mode == "discounted":
-
         products.sort(
             key=lambda product: (
                 -product[
@@ -789,34 +661,28 @@ def resolve_products(
 @router.get("/configuration")
 async def get_home_configuration():
     """
-    Return the dynamic homepage CMS configuration.
+    Return the Admin-configured homepage structure.
 
-    This endpoint is kept compatible with the existing
-    Customer Web HomePage.
+    This endpoint is used by the Customer Web to determine:
+    - which sections are visible
+    - section order
+    - section content
+    - selected categories
+    - selected products
+    - homepage settings
 
-    Data comes from:
-        homepage_sections
-        homepage_items
-        homepage_settings
-
-    No homepage sections or products are hardcoded.
+    Existing App/Admin endpoints are not changed.
     """
 
-    now = datetime.now(
-        timezone.utc
-    )
+    now = datetime.now(timezone.utc)
 
     try:
-
-        # ====================================================
-        # LOAD PUBLISHED SECTIONS
-        # ====================================================
-
+        # ------------------------------------------------------
+        # Fetch published and visible homepage sections
+        # ------------------------------------------------------
         sections_response = (
             supabase
-            .table(
-                "homepage_sections"
-            )
+            .table("homepage_sections")
             .select("*")
             .eq(
                 "publish_status",
@@ -826,37 +692,33 @@ async def get_home_configuration():
                 "is_visible",
                 True,
             )
-            .order(
-                "sort_order"
-            )
+            .order("sort_order")
             .execute()
         )
 
         sections = [
             section
-            for section
-            in sections_response.data or []
+            for section in (
+                sections_response.data or []
+            )
             if is_published(
                 section,
                 now,
             )
         ]
 
-        # ====================================================
-        # INITIALIZE SECTION ITEMS
-        # ====================================================
-
+        # ------------------------------------------------------
+        # Prepare section item mapping
+        # ------------------------------------------------------
         section_items = {
             str(section["id"]): []
             for section in sections
         }
 
-        # ====================================================
-        # LOAD PUBLISHED ITEMS
-        # ====================================================
-
+        # ------------------------------------------------------
+        # Fetch published and visible homepage items
+        # ------------------------------------------------------
         if sections:
-
             section_ids = [
                 section["id"]
                 for section in sections
@@ -864,9 +726,7 @@ async def get_home_configuration():
 
             items_response = (
                 supabase
-                .table(
-                    "homepage_items"
-                )
+                .table("homepage_items")
                 .select("*")
                 .in_(
                     "section_id",
@@ -880,16 +740,13 @@ async def get_home_configuration():
                     "is_visible",
                     True,
                 )
-                .order(
-                    "sort_order"
-                )
+                .order("sort_order")
                 .execute()
             )
 
             for item in (
                 items_response.data or []
             ):
-
                 if not is_published(
                     item,
                     now,
@@ -910,14 +767,12 @@ async def get_home_configuration():
                         section_id
                     ].append(item)
 
-        # ====================================================
-        # BUILD PUBLIC SECTIONS
-        # ====================================================
-
+        # ------------------------------------------------------
+        # Build public section response
+        # ------------------------------------------------------
         public_sections = []
 
         for section in sections:
-
             items = section_items.get(
                 str(section["id"]),
                 [],
@@ -931,117 +786,89 @@ async def get_home_configuration():
                 "id": section.get(
                     "id"
                 ),
-
-                # Existing Customer Web supports
-                # section_key through the "key" fallback.
                 "key": section.get(
                     "section_key"
                 ),
-
                 "type": section_type,
-
                 "title": section.get(
                     "title"
                 ),
-
                 "subtitle": section.get(
                     "subtitle"
                 ),
-
                 "eyebrow": section.get(
                     "eyebrow"
                 ),
-
                 "sort_order": section.get(
                     "sort_order",
                     0,
                 ),
-
                 "selection_mode": section.get(
                     "selection_mode",
                     "manual",
                 ),
-
                 "category_id": section.get(
                     "category_id"
                 ),
-
                 "product_limit": safe_limit(
                     section.get(
                         "product_limit"
                     )
                 ),
-
                 "layout_config": safe_object(
                     section.get(
                         "layout_config"
                     )
                 ),
-
                 "content_config": safe_object(
                     section.get(
                         "content_config"
                     )
                 ),
-
                 "items": [
                     public_item(item)
                     for item in items
                 ],
-
                 "categories": [],
-
                 "products": [],
             }
 
-            # ------------------------------------------------
-            # CATEGORY SECTION
-            # ------------------------------------------------
-
+            # Resolve categories from Admin selections.
             if (
                 section_type
                 in CATEGORY_SECTION_TYPES
             ):
-
-                result[
-                    "categories"
-                ] = resolve_categories(
-                    section,
-                    items,
+                result["categories"] = (
+                    resolve_categories(
+                        section,
+                        items,
+                    )
                 )
 
-            # ------------------------------------------------
-            # PRODUCT SECTION
-            # ------------------------------------------------
-
+            # Resolve products from Admin selections.
             if (
                 section_type
                 in PRODUCT_SECTION_TYPES
             ):
-
-                result[
-                    "products"
-                ] = resolve_products(
-                    section,
-                    items,
+                result["products"] = (
+                    resolve_products(
+                        section,
+                        items,
+                    )
                 )
 
             public_sections.append(
                 result
             )
 
-        # ====================================================
-        # HOMEPAGE SETTINGS
-        # ====================================================
-
+        # ------------------------------------------------------
+        # Fetch homepage settings
+        # ------------------------------------------------------
         settings_response = (
             supabase
-            .table(
-                "homepage_settings"
-            )
+            .table("homepage_settings")
             .select(
-                "setting_key,"
-                "setting_value"
+                "setting_key,setting_value"
             )
             .eq(
                 "is_active",
@@ -1055,31 +882,21 @@ async def get_home_configuration():
         for setting in (
             settings_response.data or []
         ):
-
             key = setting.get(
                 "setting_key"
             )
 
             if key:
-
-                settings[key] = (
-                    safe_object(
-                        setting.get(
-                            "setting_value"
-                        )
+                settings[key] = safe_object(
+                    setting.get(
+                        "setting_value"
                     )
                 )
-
-        # ====================================================
-        # FINAL RESPONSE
-        # ====================================================
 
         return {
             "status": "success",
             "data": {
-                "sections": (
-                    public_sections
-                ),
+                "sections": public_sections,
                 "settings": settings,
             },
             "count": len(
@@ -1088,7 +905,6 @@ async def get_home_configuration():
         }
 
     except Exception:
-
         logger.exception(
             "Failed to retrieve dynamic homepage configuration"
         )
@@ -1103,14 +919,12 @@ async def get_home_configuration():
 
 
 # ============================================================
-# HOME CATEGORIES
+# EXISTING: HOME CATEGORIES
 # ============================================================
 
 @router.get("/categories")
 async def get_home_categories():
-
     try:
-
         response = (
             supabase
             .table("categories")
@@ -1138,13 +952,10 @@ async def get_home_categories():
 
         return {
             "status": "success",
-            "data": (
-                response.data or []
-            ),
+            "data": response.data or [],
         }
 
     except Exception:
-
         logger.exception(
             "Failed to retrieve homepage categories"
         )
@@ -1161,14 +972,12 @@ async def get_home_categories():
 
 
 # ============================================================
-# FEATURED PRODUCTS
+# EXISTING: FEATURED PRODUCTS
 # ============================================================
 
 @router.get("/featured-products")
 async def get_featured_products():
-
     try:
-
         response = (
             supabase
             .table("products")
@@ -1217,7 +1026,6 @@ async def get_featured_products():
         for product in (
             response.data or []
         ):
-
             variants = (
                 product.get(
                     "product_variants"
@@ -1235,8 +1043,7 @@ async def get_featured_products():
             default_variant = next(
                 (
                     variant
-                    for variant
-                    in variants
+                    for variant in variants
                     if (
                         variant.get(
                             "attributes"
@@ -1254,15 +1061,12 @@ async def get_featured_products():
                 default_variant is None
                 and variants
             ):
-                default_variant = (
-                    variants[0]
-                )
+                default_variant = variants[0]
 
             primary_image = next(
                 (
                     image
-                    for image
-                    in images
+                    for image in images
                     if image.get(
                         "is_primary"
                     )
@@ -1275,58 +1079,46 @@ async def get_featured_products():
                 primary_image is None
                 and images
             ):
-                primary_image = (
-                    images[0]
-                )
+                primary_image = images[0]
 
-            products.append(
-                {
-                    "id": product["id"],
-                    "name": product["name"],
-                    "slug": product["slug"],
-                    "description": (
-                        product.get(
-                            "short_description"
-                        )
-                    ),
-                    "rating": (
-                        product.get(
-                            "average_rating"
-                        )
-                        or 0
-                    ),
-                    "review_count": (
-                        product.get(
-                            "review_count"
-                        )
-                        or 0
-                    ),
-                    "price": (
-                        default_variant.get(
-                            "price"
-                        )
-                        if default_variant
-                        else None
-                    ),
-                    "compare_at_price": (
-                        default_variant.get(
-                            "compare_at_price"
-                        )
-                        if default_variant
-                        else None
-                    ),
-                    "variant": (
-                        default_variant
-                    ),
-                    "image": (
-                        primary_image.get(
-                            "image_url"
-                        )
-                        if primary_image
-                        else None
-                    ),
-                }
-            )
+            products.append({
+                "id": product["id"],
+                "name": product["name"],
+                "slug": product["slug"],
+                "description": product.get(
+                    "short_description"
+                ),
+                "rating": product.get(
+                    "average_rating"
+                )
+                or 0,
+                "review_count": product.get(
+                    "review_count"
+                )
+                or 0,
+                "price": (
+                    default_variant.get(
+                        "price"
+                    )
+                    if default_variant
+                    else None
+                ),
+                "compare_at_price": (
+                    default_variant.get(
+                        "compare_at_price"
+                    )
+                    if default_variant
+                    else None
+                ),
+                "variant": default_variant,
+                "image": (
+                    primary_image.get(
+                        "image_url"
+                    )
+                    if primary_image
+                    else None
+                ),
+            })
 
         return {
             "status": "success",
@@ -1335,7 +1127,6 @@ async def get_featured_products():
         }
 
     except Exception:
-
         logger.exception(
             "Featured products API failed"
         )
@@ -1350,19 +1141,15 @@ async def get_featured_products():
 
 
 # ============================================================
-# WELLNESS BUNDLES
+# EXISTING: WELLNESS BUNDLES
 # ============================================================
 
 @router.get("/bundles")
 async def get_home_bundles():
-
     try:
-
         response = (
             supabase
-            .table(
-                "wellness_bundles"
-            )
+            .table("wellness_bundles")
             .select(
                 """
                 id,
@@ -1394,13 +1181,10 @@ async def get_home_bundles():
             "count": len(
                 response.data or []
             ),
-            "data": (
-                response.data or []
-            ),
+            "data": response.data or [],
         }
 
     except Exception:
-
         logger.exception(
             "Failed to retrieve homepage bundles"
         )
@@ -1415,23 +1199,17 @@ async def get_home_bundles():
 
 
 # ============================================================
-# SHOP BY CONCERN
+# EXISTING: SHOP BY CONCERN
 # ============================================================
 
 @router.get("/shop-by-concern")
 async def get_shop_by_concern():
-
     try:
-
         categories_response = (
             supabase
             .table("categories")
             .select(
-                "id,"
-                "name,"
-                "slug,"
-                "image_url,"
-                "parent_id"
+                "id,name,slug,image_url,parent_id"
             )
             .eq(
                 "is_active",
@@ -1446,7 +1224,6 @@ async def get_shop_by_concern():
             categories_response.data
             or []
         ):
-
             if not category.get(
                 "parent_id"
             ):
@@ -1514,7 +1291,6 @@ async def get_shop_by_concern():
         for item in (
             response.data or []
         ):
-
             product = (
                 item.get("product")
                 or {}
@@ -1538,9 +1314,7 @@ async def get_shop_by_concern():
 
             subcategory_sales[
                 category_id
-            ][
-                "units_sold"
-            ] += (
+            ]["units_sold"] += (
                 item.get("quantity")
                 or 0
             )
@@ -1551,12 +1325,9 @@ async def get_shop_by_concern():
             )
 
             if order.get("id"):
-
                 subcategory_sales[
                     category_id
-                ][
-                    "total_orders"
-                ].add(
+                ]["total_orders"].add(
                     order["id"]
                 )
 
@@ -1565,29 +1336,22 @@ async def get_shop_by_concern():
         for category in (
             subcategory_sales.values()
         ):
-
-            results.append(
-                {
-                    "id": category["id"],
-                    "name": category["name"],
-                    "slug": category["slug"],
-                    "image_url": (
-                        category[
-                            "image_url"
-                        ]
-                    ),
-                    "units_sold": (
-                        category[
-                            "units_sold"
-                        ]
-                    ),
-                    "total_orders": len(
-                        category[
-                            "total_orders"
-                        ]
-                    ),
-                }
-            )
+            results.append({
+                "id": category["id"],
+                "name": category["name"],
+                "slug": category["slug"],
+                "image_url": category[
+                    "image_url"
+                ],
+                "units_sold": category[
+                    "units_sold"
+                ],
+                "total_orders": len(
+                    category[
+                        "total_orders"
+                    ]
+                ),
+            })
 
         results.sort(
             key=lambda item: (
@@ -1606,7 +1370,6 @@ async def get_shop_by_concern():
         }
 
     except Exception:
-
         logger.exception(
             "Shop by Concern API failed"
         )
@@ -1621,7 +1384,7 @@ async def get_shop_by_concern():
 
 
 # ============================================================
-# COUPONS
+# EXISTING: COUPONS
 # ============================================================
 
 @router.get("/coupons")
@@ -1634,12 +1397,12 @@ async def get_home_coupons(
         ),
     ),
 ):
-
     try:
-
-        now = datetime.now(
-            timezone.utc
-        ).isoformat()
+        now = (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        )
 
         response = (
             supabase
@@ -1693,7 +1456,6 @@ async def get_home_coupons(
         }
 
     except Exception:
-
         logger.exception(
             "Failed to retrieve homepage coupons"
         )
@@ -1708,14 +1470,12 @@ async def get_home_coupons(
 
 
 # ============================================================
-# NEW ARRIVALS
+# EXISTING: NEW ARRIVALS
 # ============================================================
 
 @router.get("/new-arrivals")
 async def get_new_arrivals():
-
     try:
-
         response = (
             supabase
             .table("products")
@@ -1762,7 +1522,6 @@ async def get_new_arrivals():
         for product in (
             response.data or []
         ):
-
             variants = (
                 product.get(
                     "product_variants"
@@ -1780,8 +1539,7 @@ async def get_new_arrivals():
             default_variant = next(
                 (
                     variant
-                    for variant
-                    in variants
+                    for variant in variants
                     if (
                         variant.get(
                             "attributes"
@@ -1799,15 +1557,12 @@ async def get_new_arrivals():
                 default_variant is None
                 and variants
             ):
-                default_variant = (
-                    variants[0]
-                )
+                default_variant = variants[0]
 
             primary_image = next(
                 (
                     image
-                    for image
-                    in images
+                    for image in images
                     if image.get(
                         "is_primary"
                     )
@@ -1820,63 +1575,49 @@ async def get_new_arrivals():
                 primary_image is None
                 and images
             ):
-                primary_image = (
-                    images[0]
-                )
+                primary_image = images[0]
 
-            products.append(
-                {
-                    "id": product["id"],
-                    "name": product["name"],
-                    "slug": product["slug"],
-                    "description": (
-                        product.get(
-                            "short_description"
-                        )
-                    ),
-                    "rating": (
-                        product.get(
-                            "average_rating"
-                        )
-                        or 0
-                    ),
-                    "review_count": (
-                        product.get(
-                            "review_count"
-                        )
-                        or 0
-                    ),
-                    "price": (
-                        default_variant.get(
-                            "price"
-                        )
-                        if default_variant
-                        else None
-                    ),
-                    "compare_at_price": (
-                        default_variant.get(
-                            "compare_at_price"
-                        )
-                        if default_variant
-                        else None
-                    ),
-                    "variant": (
-                        default_variant
-                    ),
-                    "image": (
-                        primary_image.get(
-                            "image_url"
-                        )
-                        if primary_image
-                        else None
-                    ),
-                    "created_at": (
-                        product.get(
-                            "created_at"
-                        )
-                    ),
-                }
-            )
+            products.append({
+                "id": product["id"],
+                "name": product["name"],
+                "slug": product["slug"],
+                "description": product.get(
+                    "short_description"
+                ),
+                "rating": product.get(
+                    "average_rating"
+                )
+                or 0,
+                "review_count": product.get(
+                    "review_count"
+                )
+                or 0,
+                "price": (
+                    default_variant.get(
+                        "price"
+                    )
+                    if default_variant
+                    else None
+                ),
+                "compare_at_price": (
+                    default_variant.get(
+                        "compare_at_price"
+                    )
+                    if default_variant
+                    else None
+                ),
+                "variant": default_variant,
+                "image": (
+                    primary_image.get(
+                        "image_url"
+                    )
+                    if primary_image
+                    else None
+                ),
+                "created_at": product.get(
+                    "created_at"
+                ),
+            })
 
         return {
             "status": "success",
@@ -1885,7 +1626,6 @@ async def get_new_arrivals():
         }
 
     except Exception:
-
         logger.exception(
             "New Arrivals API failed"
         )
@@ -1900,14 +1640,12 @@ async def get_new_arrivals():
 
 
 # ============================================================
-# APP BANNERS
+# EXISTING: APP BANNERS
 # ============================================================
 
 @router.get("/app-banners")
 async def get_app_banners():
-
     try:
-
         response = (
             supabase
             .table("banners")
@@ -1940,13 +1678,10 @@ async def get_app_banners():
             "count": len(
                 response.data or []
             ),
-            "data": (
-                response.data or []
-            ),
+            "data": response.data or [],
         }
 
     except Exception:
-
         logger.exception(
             "App banners API failed"
         )
@@ -1961,29 +1696,31 @@ async def get_app_banners():
 
 
 # ============================================================
-# CATEGORY BANNERS
+# EXISTING: CATEGORY BANNERS
 # ============================================================
 
 @router.get("/category-banners")
 async def get_category_banners():
     """
-    Get active category banners.
+    Get active category banners for the
+    customer mobile app.
 
     Only banners that are:
     - platform = app
     - placement = category
     - visible
     - published
-    - within scheduled publish window
+    - within their scheduled publish window
 
     are returned.
     """
 
     try:
-
-        now = datetime.now(
-            timezone.utc
-        ).isoformat()
+        now = (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        )
 
         response = (
             supabase
@@ -2056,7 +1793,6 @@ async def get_category_banners():
         }
 
     except Exception:
-
         logger.exception(
             "Category banners API failed"
         )
@@ -2071,19 +1807,15 @@ async def get_category_banners():
 
 
 # ============================================================
-# CATEGORY CAMPAIGNS
+# EXISTING: CATEGORY CAMPAIGNS
 # ============================================================
 
 @router.get("/category-campaigns")
 async def get_category_campaigns():
-
     try:
-
         response = (
             supabase
-            .table(
-                "category_campaigns"
-            )
+            .table("category_campaigns")
             .select(
                 """
                 id,
@@ -2119,7 +1851,6 @@ async def get_category_campaigns():
         }
 
     except Exception:
-
         logger.exception(
             "Category campaigns API failed"
         )
