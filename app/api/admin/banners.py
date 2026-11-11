@@ -316,6 +316,8 @@ async def update_banner(
     target_type: str | None = Form(default=None),
     target_id: str | None = Form(default=None),
     target_url: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    display_location: str | None = Form(default=None),
     sort_order: int | None = Form(default=None),
     is_visible: bool | None = Form(default=None),
     publish_status: str | None = Form(default=None),
@@ -340,10 +342,12 @@ async def update_banner(
                 detail="Banner not found",
             )
 
-        if existing.get("platform") != "web":
+        platform = existing.get("platform")
+        placement = existing.get("placement")
+        if platform not in {"app", "web"}:
             raise HTTPException(
                 status_code=400,
-                detail="This endpoint only supports Web banners",
+                detail="Unsupported banner platform",
             )
 
         update_data = {}
@@ -359,6 +363,44 @@ async def update_banner(
 
         if target_url is not None:
             update_data["target_url"] = target_url or None
+
+        if category_id is not None:
+            if placement != "category" or platform != "app":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Category can only be changed for App category banners",
+                )
+            category_result = (
+                supabase
+                .table("categories")
+                .select("id, name")
+                .eq("id", category_id)
+                .maybe_single()
+                .execute()
+            )
+            if not category_result.data:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Category not found",
+                )
+            update_data["category_id"] = category_id
+            update_data["target_id"] = category_id
+            update_data["title"] = category_result.data["name"]
+            update_data["metadata"] = {
+                **(existing.get("metadata") or {}),
+                "category_id": category_id,
+            }
+
+        if display_location is not None:
+            if platform != "app" or placement != "home":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Display location can only be changed for App promotional banners",
+                )
+            update_data["metadata"] = {
+                **(update_data.get("metadata") or existing.get("metadata") or {}),
+                "display_location": display_location,
+            }
 
         if sort_order is not None:
             update_data["sort_order"] = sort_order
@@ -378,7 +420,6 @@ async def update_banner(
         new_storage_path = None
 
         if image is not None:
-            placement = existing.get("placement")
             allowed_types = {
                 "image/jpeg",
                 "image/png",
@@ -414,13 +455,21 @@ async def update_banner(
                     detail="Invalid image dimensions",
                 )
 
-            if (
-                placement == "hero"
-                and abs(width / height - (7 / 3)) > 0.03
-            ):
+            required_ratio = (
+                3.0
+                if platform == "app" and placement == "category"
+                else (7 / 3)
+                if platform == "app" or placement == "hero"
+                else None
+            )
+            if required_ratio and abs(width / height - required_ratio) > 0.03:
                 raise HTTPException(
                     status_code=400,
-                    detail="Banner image must use a 7:3 aspect ratio",
+                    detail=(
+                        "Category banner image must use a 3:1 aspect ratio"
+                        if required_ratio == 3.0
+                        else "Banner image must use a 7:3 aspect ratio"
+                    ),
                 )
 
             extension = (
@@ -429,14 +478,17 @@ async def update_banner(
                 else "png"
             )
             storage_folder = {
-                "hero": "banners/web/hero",
-                "main-promo-banner": "main-promo-banner",
-                "shop-by-need": "shop-by-need",
-            }.get(placement)
+                ("app", "home"): "banners/app/home",
+                ("app", "category"): "banners/app/category",
+                ("web", "hero"): "banners/web/hero",
+                ("web", "main-promo-banner"): "main-promo-banner",
+                ("web", "shop-by-need"): "shop-by-need",
+                ("web", "category-campaign"): "category-campaigns",
+            }.get((platform, placement))
             if not storage_folder:
                 raise HTTPException(
                     status_code=400,
-                    detail="Unsupported Web banner placement",
+                    detail="Unsupported banner placement",
                 )
 
             new_storage_path = f"{storage_folder}/{uuid4()}.{extension}"
@@ -479,12 +531,14 @@ async def update_banner(
 
         if new_storage_path:
             old_storage_path = existing.get("storage_path")
-            placement = existing.get("placement")
             old_storage_folder = {
-                "hero": "banners/web/hero",
-                "main-promo-banner": "main-promo-banner",
-                "shop-by-need": "shop-by-need",
-            }.get(placement)
+                ("app", "home"): "banners/app/home",
+                ("app", "category"): "banners/app/category",
+                ("web", "hero"): "banners/web/hero",
+                ("web", "main-promo-banner"): "main-promo-banner",
+                ("web", "shop-by-need"): "shop-by-need",
+                ("web", "category-campaign"): "category-campaigns",
+            }.get((platform, placement))
             if (
                 old_storage_path
                 and old_storage_folder
@@ -493,7 +547,7 @@ async def update_banner(
                 delete_storage_file(old_storage_path)
 
         return {
-            "message": "Web banner updated successfully",
+            "message": f"{platform.capitalize()} banner updated successfully",
             "item": result.data[0] if result.data else None,
         }
 
@@ -530,10 +584,11 @@ def delete_banner(
                 detail="Banner not found",
             )
 
-        if existing.get("platform") != "web":
+        platform = existing.get("platform")
+        if platform not in {"app", "web"}:
             raise HTTPException(
                 status_code=400,
-                detail="This endpoint only supports Web banners",
+                detail="Unsupported banner platform",
             )
 
         (
@@ -546,10 +601,13 @@ def delete_banner(
 
         storage_path = existing.get("storage_path")
         storage_folder = {
-            "hero": "banners/web/hero",
-            "main-promo-banner": "main-promo-banner",
-            "shop-by-need": "shop-by-need",
-        }.get(existing.get("placement"))
+            ("app", "home"): "banners/app/home",
+            ("app", "category"): "banners/app/category",
+            ("web", "hero"): "banners/web/hero",
+            ("web", "main-promo-banner"): "main-promo-banner",
+            ("web", "shop-by-need"): "shop-by-need",
+            ("web", "category-campaign"): "category-campaigns",
+        }.get((platform, existing.get("placement")))
         if (
             storage_path
             and storage_folder
