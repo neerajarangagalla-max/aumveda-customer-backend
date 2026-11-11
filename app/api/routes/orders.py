@@ -1,9 +1,13 @@
+
 import logging
-import time
-import httpx
+from fastapi.responses import Response
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from io import BytesIO
 from typing import Literal
 from uuid import UUID
-
+import time
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -18,6 +22,7 @@ from fastapi.security import (
 
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.supabase import supabase
 
 
@@ -202,8 +207,9 @@ def create_order(
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Unable to create order. Please try again.",
-                    )
+                )
             order = order[0]
+
         create_admin_order_notification(order)
 
         return {
@@ -264,8 +270,6 @@ def create_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create order: {message}",
         )
-
-
 # ============================================================
 # GET ORDERS
 # ============================================================
@@ -666,6 +670,347 @@ def get_buy_again_products(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to load previously purchased products.",
+        )
+
+
+
+# ============================================================
+# DOWNLOAD CUSTOMER INVOICE
+# ============================================================
+
+@router.get("/{order_id}/invoice")
+def download_invoice(
+    order_id: UUID,
+    customer_id: str = Depends(get_current_customer_id),
+):
+    try:
+        # 1. Fetch the order belonging to the authenticated customer.
+        response = execute_supabase_read(
+            supabase
+            .table("orders")
+            .select(
+                """
+                id,
+                order_number,
+                customer_id,
+                status,
+                payment_method,
+                payment_status,
+                currency,
+                subtotal,
+                shipping,
+                discount,
+                tax,
+                total_amount,
+                created_at
+                """
+            )
+            .eq("id", str(order_id))
+            .eq("customer_id", customer_id)
+            .limit(1)
+        )
+
+        orders = response.data or []
+
+        if not orders:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found.",
+            )
+
+        order = orders[0]
+
+        # 2. Invoice is available only for successfully paid orders.
+        if str(order.get("payment_status", "")).lower() != "paid":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice is available only for successfully paid orders.",
+            )
+
+        # 3. Fetch the items belonging to this order.
+        items_response = execute_supabase_read(
+            supabase
+            .table("order_items")
+            .select(
+                """
+                id,
+                product_name,
+                variant_name,
+                quantity,
+                unit_price,
+                total_price
+                """
+            )
+            .eq("order_id", str(order_id))
+        )
+
+        order_items = items_response.data or []
+
+        # 4. Generate the PDF only when the customer requests it.
+        pdf_buffer = BytesIO()
+        pdf = canvas.Canvas(
+            pdf_buffer,
+            pagesize=A4,
+        )
+
+        page_width, page_height = A4
+        left_margin = 40
+        right_margin = page_width - 40
+        y = page_height - 50
+
+        currency = order.get("currency") or "INR"
+
+        def money(value):
+            try:
+                return f"{currency} {float(value or 0):,.2f}"
+            except (TypeError, ValueError):
+                return f"{currency} 0.00"
+
+        def draw_text(text, x, y_position, size=10):
+            pdf.setFont("Helvetica", size)
+            pdf.drawString(
+                x,
+                y_position,
+                str(text),
+            )
+
+        # Header
+        pdf.setFont("Helvetica-Bold", 20)
+        pdf.drawString(
+            left_margin,
+            y,
+            "AUMVEDA",
+        )
+
+        y -= 28
+
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(
+            left_margin,
+            y,
+            "INVOICE",
+        )
+
+        y -= 35
+
+        draw_text(
+            f"Order Number: {order.get('order_number') or str(order_id)}",
+            left_margin,
+            y,
+        )
+
+        y -= 18
+
+        draw_text(
+            f"Order Date: {order.get('created_at') or '-'}",
+            left_margin,
+            y,
+        )
+
+        y -= 18
+
+        draw_text(
+            f"Payment Status: {order.get('payment_status') or '-'}",
+            left_margin,
+            y,
+        )
+
+        y -= 30
+
+        # Table header
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(left_margin, y, "Product")
+        pdf.drawString(330, y, "Qty")
+        pdf.drawString(380, y, "Price")
+        pdf.drawString(470, y, "Total")
+
+        y -= 8
+        pdf.line(left_margin, y, right_margin, y)
+        y -= 18
+
+        # Order items
+        pdf.setFont("Helvetica", 9)
+
+        for item in order_items:
+            product_name = (
+                item.get("product_name")
+                or "Product"
+            )
+
+            variant_name = item.get("variant_name")
+
+            if variant_name:
+                product_name = f"{product_name} - {variant_name}"
+
+            # Keep the product name within the invoice column.
+            if len(product_name) > 48:
+                product_name = product_name[:45] + "..."
+
+            quantity = item.get("quantity") or 0
+            unit_price = item.get("unit_price") or 0
+            total_price = item.get("total_price")
+
+            if total_price is None:
+                try:
+                    total_price = float(unit_price) * int(quantity)
+                except (TypeError, ValueError):
+                    total_price = 0
+
+            pdf.drawString(
+                left_margin,
+                y,
+                str(product_name),
+            )
+
+            pdf.drawRightString(
+                350,
+                y,
+                str(quantity),
+            )
+
+            pdf.drawRightString(
+                455,
+                y,
+                money(unit_price),
+            )
+
+            pdf.drawRightString(
+                right_margin,
+                y,
+                money(total_price),
+            )
+
+            y -= 18
+
+            # Start a new page if the item list becomes long.
+            if y < 100:
+                pdf.showPage()
+                y = page_height - 50
+
+                pdf.setFont("Helvetica-Bold", 10)
+                pdf.drawString(left_margin, y, "Product")
+                pdf.drawString(330, y, "Qty")
+                pdf.drawString(380, y, "Price")
+                pdf.drawString(470, y, "Total")
+
+                y -= 20
+                pdf.setFont("Helvetica", 9)
+
+        y -= 10
+        pdf.line(left_margin, y, right_margin, y)
+        y -= 25
+
+        # Summary
+        summary_x = 360
+        value_x = right_margin
+
+        pdf.setFont("Helvetica", 10)
+
+        pdf.drawString(
+            summary_x,
+            y,
+            "Subtotal",
+        )
+        pdf.drawRightString(
+            value_x,
+            y,
+            money(order.get("subtotal")),
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            summary_x,
+            y,
+            "Shipping",
+        )
+        pdf.drawRightString(
+            value_x,
+            y,
+            money(order.get("shipping")),
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            summary_x,
+            y,
+            "Discount",
+        )
+        pdf.drawRightString(
+            value_x,
+            y,
+            money(order.get("discount")),
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            summary_x,
+            y,
+            "Tax",
+        )
+        pdf.drawRightString(
+            value_x,
+            y,
+            money(order.get("tax")),
+        )
+
+        y -= 24
+
+        pdf.setFont("Helvetica-Bold", 11)
+
+        pdf.drawString(
+            summary_x,
+            y,
+            "Total",
+        )
+        pdf.drawRightString(
+            value_x,
+            y,
+            money(order.get("total_amount")),
+        )
+
+        y -= 45
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(
+            left_margin,
+            y,
+            "Thank you for shopping with AUMVEDA.",
+        )
+
+        pdf.save()
+
+        pdf_buffer.seek(0)
+
+        filename = (
+            f"invoice-{order.get('order_number') or str(order_id)}.pdf"
+        )
+
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename}"'
+                )
+            },
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        logger.exception(
+            "Failed to generate customer invoice: order_id=%s customer_id=%s",
+            order_id,
+            customer_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate invoice. Please try again.",
         )
 
 

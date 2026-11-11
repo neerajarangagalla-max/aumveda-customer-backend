@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------
 
     cors_origins: str = ""
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

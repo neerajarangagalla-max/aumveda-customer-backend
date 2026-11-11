@@ -1,7 +1,12 @@
 from typing import Literal
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
+
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
@@ -96,7 +101,219 @@ def get_order(order_id: str):
             detail="Unable to retrieve order",
         ) from exc
 
+@router.get("/{order_id}/invoice")
+def download_invoice(order_id: str):
+    try:
+        # Fetch order
+        order_result = (
+            supabase.table("orders")
+            .select(
+                "id, order_number, payment_status, currency, "
+                "subtotal, shipping, discount, tax, total_amount, created_at"
+            )
+            .eq("id", order_id)
+            .maybe_single()
+            .execute()
+        )
 
+        order = order_result.data
+
+        if not order:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        # Invoice is available only for paid orders
+        if str(order.get("payment_status", "")).lower() != "paid":
+            raise HTTPException(
+                status_code=400,
+                detail="Invoice is available only for successfully paid orders.",
+            )
+
+        # Fetch order items
+        items_result = (
+            supabase.table("order_items")
+            .select(
+                "id, product_name, variant_name, "
+                "quantity, unit_price, total_price"
+            )
+            .eq("order_id", order_id)
+            .execute()
+        )
+
+        items = items_result.data or []
+
+        # Generate PDF in memory
+        pdf_buffer = BytesIO()
+        pdf = canvas.Canvas(pdf_buffer, pagesize=A4)
+
+        width, height = A4
+        y = height - 50
+
+        pdf.setFont("Helvetica-Bold", 20)
+        pdf.drawString(50, y, "AUMVEDA")
+
+        y -= 30
+
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(50, y, "INVOICE")
+
+        y -= 35
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(
+            50,
+            y,
+            f"Order Number: {order.get('order_number', '-')}",
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            50,
+            y,
+            f"Order Date: {order.get('created_at', '-')}",
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            50,
+            y,
+            f"Payment Status: {order.get('payment_status', '-')}",
+        )
+
+        y -= 35
+
+        # Table headers
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(50, y, "Product")
+        pdf.drawString(300, y, "Qty")
+        pdf.drawString(350, y, "Price")
+        pdf.drawString(430, y, "Total")
+
+        y -= 20
+
+        pdf.setFont("Helvetica", 9)
+
+        currency = order.get("currency") or "INR"
+
+        for item in items:
+            product_name = item.get("product_name") or "-"
+            variant_name = item.get("variant_name")
+
+            if variant_name:
+                product_name = f"{product_name} - {variant_name}"
+
+            if len(product_name) > 40:
+                product_name = product_name[:37] + "..."
+
+            pdf.drawString(50, y, product_name)
+            pdf.drawString(
+                300,
+                y,
+                str(item.get("quantity", 0)),
+            )
+            pdf.drawString(
+                350,
+                y,
+                f"{currency} {float(item.get('unit_price') or 0):.2f}",
+            )
+            pdf.drawString(
+                430,
+                y,
+                f"{currency} {float(item.get('total_price') or 0):.2f}",
+            )
+
+            y -= 18
+
+            if y < 100:
+                pdf.showPage()
+                y = height - 50
+                pdf.setFont("Helvetica", 9)
+
+        y -= 15
+
+        pdf.setFont("Helvetica", 10)
+
+        pdf.drawString(
+            350,
+            y,
+            f"Subtotal: {currency} {float(order.get('subtotal') or 0):.2f}",
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            350,
+            y,
+            f"Shipping: {currency} {float(order.get('shipping') or 0):.2f}",
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            350,
+            y,
+            f"Discount: {currency} {float(order.get('discount') or 0):.2f}",
+        )
+
+        y -= 18
+
+        pdf.drawString(
+            350,
+            y,
+            f"Tax: {currency} {float(order.get('tax') or 0):.2f}",
+        )
+
+        y -= 22
+
+        pdf.setFont("Helvetica-Bold", 11)
+
+        pdf.drawString(
+            350,
+            y,
+            f"Total: {currency} {float(order.get('total_amount') or 0):.2f}",
+        )
+
+        y -= 40
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(
+            50,
+            y,
+            "Thank you for shopping with AUMVEDA.",
+        )
+
+        pdf.save()
+
+        pdf_buffer.seek(0)
+
+        filename = (
+            f"AUMVEDA-Invoice-{order.get('order_number', order_id)}.pdf"
+        )
+
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename}"'
+                )
+            },
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        logger.exception("Failed to generate invoice: %s", exc)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate invoice",
+        ) from exc
 
 
 
