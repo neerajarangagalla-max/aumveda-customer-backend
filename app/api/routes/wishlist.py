@@ -1,10 +1,10 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.supabase import supabase
+from app.core.security import get_current_user
+from app.core.supabase import supabase_admin
 
 router = APIRouter(
     prefix="/wishlist",
@@ -13,94 +13,12 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer(
-    auto_error=False,
-)
-
 WISHLIST_TABLE = "wishlist_items"
-
-
-def get_current_customer_id(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> str:
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication scheme.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    access_token = credentials.credentials
-
-    try:
-        auth_response = supabase.auth.get_user(access_token)
-        user = getattr(auth_response, "user", None)
-        user_id = getattr(user, "id", None)
-    except Exception:
-        logger.exception("Supabase access token validation failed")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token.",
-        )
-
-    try:
-        profile_response = (
-            supabase
-            .table("profiles")
-            .select("id,role,is_active")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-    except Exception:
-        logger.exception("Failed to load customer profile")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to verify customer profile.",
-        )
-
-    profiles = profile_response.data or []
-
-    if not profiles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Customer profile not found. Please sign in again.",
-        )
-
-    profile = profiles[0]
-
-    if profile.get("role") != "customer":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account is not a customer account.",
-        )
-
-    if profile.get("is_active") is False:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Customer account is inactive.",
-        )
-
-    return user_id
 
 
 def _add_to_wishlist(customer_id: str, product_id: str):
     existing = (
-        supabase
+        supabase_admin
         .table(WISHLIST_TABLE)
         .select("id, customer_id, product_id, created_at")
         .eq("customer_id", customer_id)
@@ -115,7 +33,7 @@ def _add_to_wishlist(customer_id: str, product_id: str):
         return existing_data[0]
 
     response = (
-        supabase
+        supabase_admin
         .table(WISHLIST_TABLE)
         .insert({
             "customer_id": customer_id,
@@ -130,7 +48,7 @@ def _add_to_wishlist(customer_id: str, product_id: str):
 
 def _remove_from_wishlist(customer_id: str, product_id: str):
     response = (
-        supabase
+        supabase_admin
         .table(WISHLIST_TABLE)
         .delete()
         .eq("customer_id", customer_id)
@@ -143,7 +61,7 @@ def _remove_from_wishlist(customer_id: str, product_id: str):
 
 def _is_product_in_wishlist(customer_id: str, product_id: str):
     response = (
-        supabase
+        supabase_admin
         .table(WISHLIST_TABLE)
         .select("id")
         .eq("customer_id", customer_id)
@@ -157,7 +75,7 @@ def _is_product_in_wishlist(customer_id: str, product_id: str):
 
 def _get_customer_wishlist(customer_id: str, limit: int = 50):
     response = (
-        supabase
+        supabase_admin
         .table(WISHLIST_TABLE)
         .select(
             """
@@ -261,11 +179,9 @@ def _get_customer_wishlist(customer_id: str, limit: int = 50):
 
 
 @router.get("")
-async def get_wishlist(
-    customer_id: str = Depends(get_current_customer_id),
-):
+async def get_wishlist(user=Depends(get_current_user)):
     try:
-        products = _get_customer_wishlist(customer_id)
+        products = _get_customer_wishlist(user.id)
 
         return {
             "status": "success",
@@ -284,10 +200,10 @@ async def get_wishlist(
 @router.post("/{product_id}")
 async def add_product_to_wishlist(
     product_id: str,
-    customer_id: str = Depends(get_current_customer_id),
+    user=Depends(get_current_user),
 ):
     try:
-        item = _add_to_wishlist(customer_id, product_id)
+        item = _add_to_wishlist(user.id, product_id)
 
         if item is None:
             raise HTTPException(
@@ -314,10 +230,10 @@ async def add_product_to_wishlist(
 @router.delete("/{product_id}")
 async def delete_product_from_wishlist(
     product_id: str,
-    customer_id: str = Depends(get_current_customer_id),
+    user=Depends(get_current_user),
 ):
     try:
-        removed = _remove_from_wishlist(customer_id, product_id)
+        removed = _remove_from_wishlist(user.id, product_id)
 
         return {
             "status": "success",
@@ -343,11 +259,11 @@ async def delete_product_from_wishlist(
 @router.get("/{product_id}/status")
 async def get_wishlist_status(
     product_id: str,
-    customer_id: str = Depends(get_current_customer_id),
+    user=Depends(get_current_user),
 ):
     try:
         wishlisted = _is_product_in_wishlist(
-            customer_id,
+            user.id,
             product_id,
         )
 

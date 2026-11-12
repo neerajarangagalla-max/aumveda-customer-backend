@@ -1199,6 +1199,94 @@ async def get_home_bundles():
 
 
 # ============================================================
+# COMPATIBILITY: CUSTOMER WEB HERO
+# ============================================================
+
+@router.get("/hero")
+async def get_home_hero():
+    """
+    Preserve the existing Customer Web /home/hero contract while
+    reading from the unified Admin-controlled banners table.
+
+    Admin remains the source of truth: only web hero banners that are
+    visible, published, and currently within their schedule are returned.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        response = (
+            supabase
+            .table("banners")
+            .select(
+                """
+                id,
+                title,
+                subtitle,
+                description,
+                image_url,
+                mobile_image_url,
+                video_url,
+                target_type,
+                target_id,
+                target_url,
+                sort_order,
+                metadata,
+                starts_at,
+                ends_at
+                """
+            )
+            .eq("platform", "web")
+            .eq("placement", "hero")
+            .eq("is_visible", True)
+            .eq("publish_status", "published")
+            .or_(f"starts_at.is.null,starts_at.lte.{now}")
+            .or_(f"ends_at.is.null,ends_at.gt.{now}")
+            .order("sort_order", desc=False)
+            .order("created_at", desc=False)
+            .limit(1)
+            .execute()
+        )
+
+        banner = (response.data or [None])[0]
+
+        if not banner:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Active hero banner not found",
+            )
+
+        # Keep the legacy Web response field names without creating a
+        # second hero-banners data source.
+        data = {
+            "id": banner.get("id"),
+            "eyebrow": (banner.get("metadata") or {}).get("eyebrow"),
+            "title_line1": banner.get("title"),
+            "title_line2": banner.get("subtitle"),
+            "description": banner.get("description"),
+            "image_url": banner.get("image_url"),
+            "video_url": banner.get("video_url"),
+            "primary_cta_text": (banner.get("metadata") or {}).get("primary_cta_text"),
+            "primary_cta_path": banner.get("target_url"),
+            "secondary_cta_text": (banner.get("metadata") or {}).get("secondary_cta_text"),
+            "secondary_cta_path": (banner.get("metadata") or {}).get("secondary_cta_path"),
+        }
+
+        return {
+            "status": "success",
+            "data": data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to retrieve homepage hero")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve homepage hero",
+        )
+
+
+# ============================================================
 # EXISTING: SHOP BY CONCERN
 # ============================================================
 
@@ -1665,6 +1753,12 @@ async def get_app_banners():
             .eq(
                 "publish_status",
                 "published",
+            )
+            .or_(
+                f"starts_at.is.null,starts_at.lte.{datetime.now(timezone.utc).isoformat()}"
+            )
+            .or_(
+                f"ends_at.is.null,ends_at.gt.{datetime.now(timezone.utc).isoformat()}"
             )
             .order(
                 "sort_order",

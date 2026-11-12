@@ -15,6 +15,15 @@ router = APIRouter(
 )
 
 
+# Compatibility router for the Customer Web contract.
+# It reuses the existing recently-viewed helpers above; no second
+# recently-viewed business-logic implementation is introduced.
+recently_viewed_router = APIRouter(
+    prefix="/recently-viewed",
+    tags=["Recently Viewed"],
+)
+
+
 # ============================================================
 # RECENTLY VIEWED HELPER FUNCTIONS
 # ============================================================
@@ -291,6 +300,22 @@ def get_products(
 
         elif category_id:
 
+            category_response = (
+                supabase
+                .table("categories")
+                .select("id,is_active")
+                .eq("id", category_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+
+            if not category_response.data:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Category not found.",
+                )
+
             subcategory_response = (
                 supabase
                 .table("categories")
@@ -434,6 +459,7 @@ def get_categories():
             supabase
             .table("categories")
             .select("id,name,parent_id")
+            .eq("is_active", True)
             .order("name")
             .execute()
         )
@@ -491,6 +517,78 @@ def recently_viewed_products(
 
 
 # ============================================================
+# CUSTOMER WEB COMPATIBILITY: RECENTLY VIEWED
+# ============================================================
+
+@recently_viewed_router.get("")
+def get_recently_viewed_compat(
+    limit: int = 10,
+    user=Depends(get_current_user),
+):
+    try:
+        limit = max(1, min(limit, 20))
+        products = get_recently_viewed_products(
+            customer_id=str(user.id),
+            limit=limit,
+        )
+        return {
+            "status": "success",
+            "count": len(products),
+            "data": products,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unable to retrieve recently viewed products")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve recently viewed products.",
+        )
+
+
+@recently_viewed_router.post("/{product_id}")
+def record_recently_viewed_compat(
+    product_id: str,
+    user=Depends(get_current_user),
+):
+    try:
+        product_response = (
+            supabase
+            .table("products")
+            .select("id")
+            .eq("id", product_id)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+
+        if not product_response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found.",
+            )
+
+        result = record_product_view(
+            customer_id=str(user.id),
+            product_id=product_id,
+        )
+
+        return {
+            "status": "success",
+            "message": "Product view recorded.",
+            "data": result,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unable to record recently viewed product")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to record product view.",
+        )
+
+
+# ============================================================
 # GET PRODUCT BY SLUG
 # ============================================================
 
@@ -510,6 +608,7 @@ def get_product_by_slug(slug: str):
                 """
             )
             .eq("slug", slug)
+            .eq("status", "active")
             .single()
             .execute()
         )
