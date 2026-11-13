@@ -18,6 +18,7 @@ from app.api.admin import (
     coupons as admin_coupons,
     notifications as admin_notifications,
     support as admin_support,
+    content_management as admin_content_management,
 )
 
 from app.api.routes import (
@@ -84,3 +85,4 @@ api_router.include_router(admin_returns.router)
 api_router.include_router(admin_coupons.router)
 api_router.include_router(admin_notifications.router)
 api_router.include_router(admin_support.router)
+api_router.include_router(admin_content_management.router)

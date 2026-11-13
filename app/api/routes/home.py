@@ -659,7 +659,10 @@ def resolve_products(
 # ============================================================
 
 @router.get("/configuration")
-async def get_home_configuration():
+async def get_home_configuration(
+    platform: str = Query("web", pattern="^(app|web)$"),
+    page: str = Query("home", min_length=1, max_length=100),
+):
     """
     Return the Admin-configured homepage structure.
 
@@ -691,6 +694,14 @@ async def get_home_configuration():
             .eq(
                 "is_visible",
                 True,
+            )
+            .eq(
+                "platform",
+                platform,
+            )
+            .eq(
+                "page_key",
+                page,
             )
             .order("sort_order")
             .execute()
@@ -902,6 +913,8 @@ async def get_home_configuration():
             "count": len(
                 public_sections
             ),
+            "platform": platform,
+            "page_key": page,
         }
 
     except Exception:
@@ -1283,6 +1296,74 @@ async def get_home_hero():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to retrieve homepage hero",
+        )
+
+
+def _get_active_web_banners(placement: str):
+    now = datetime.now(timezone.utc).isoformat()
+    response = (
+        supabase
+        .table("banners")
+        .select(
+            """
+            id,
+            title,
+            subtitle,
+            description,
+            image_url,
+            target_type,
+            target_id,
+            target_url,
+            sort_order,
+            metadata,
+            starts_at,
+            ends_at
+            """
+        )
+        .eq("platform", "web")
+        .eq("placement", placement)
+        .eq("is_visible", True)
+        .eq("publish_status", "published")
+        .or_(f"starts_at.is.null,starts_at.lte.{now}")
+        .or_(f"ends_at.is.null,ends_at.gt.{now}")
+        .order("sort_order", desc=False)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return response.data or []
+
+
+@router.get("/web-hero-banners")
+def get_web_hero_banners():
+    try:
+        items = _get_active_web_banners("hero")
+        return {
+            "status": "success",
+            "data": items,
+            "count": len(items),
+        }
+    except Exception:
+        logger.exception("Failed to retrieve web hero banners")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve web hero banners",
+        )
+
+
+@router.get("/main-promo-banners")
+def get_main_promo_banners():
+    try:
+        items = _get_active_web_banners("main-promo-banner")
+        return {
+            "status": "success",
+            "data": items,
+            "count": len(items),
+        }
+    except Exception:
+        logger.exception("Failed to retrieve main promo banners")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve main promo banners",
         )
 
 

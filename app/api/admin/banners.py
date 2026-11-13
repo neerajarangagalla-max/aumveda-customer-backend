@@ -150,7 +150,7 @@ def list_banners(
 
 @router.post("")
 async def create_banner(
-    image: UploadFile = File(...),
+    image: UploadFile | None = File(default=None),
     display_location: str | None = Form(None),
     display_order: int | None = Form(None),
     publish_status: str = Form("draft"),
@@ -159,6 +159,14 @@ async def create_banner(
     platform: str = Form(default="app"),
     placement: str = Form(default="home"),
     title: str | None = Form(None),
+    subtitle: str | None = Form(None),
+    description: str | None = Form(None),
+    eyebrow: str | None = Form(None),
+    heading_line2: str | None = Form(None),
+    primary_cta_text: str | None = Form(None),
+    benefit_one: str | None = Form(None),
+    benefit_two: str | None = Form(None),
+    target_url: str | None = Form(None),
     sort_order: int | None = Form(None),
 ):
     try:
@@ -174,83 +182,104 @@ async def create_banner(
                 detail="Banner placement is required.",
             )
 
-        allowed_types = {
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-        }
-
-        if image.content_type not in allowed_types:
-            raise HTTPException(
-                status_code=400,
-                detail="Only JPG, PNG, and WEBP images are allowed",
-            )
-
-        file_bytes = await image.read()
-
-        if not file_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail="Banner image is empty",
-            )
-
-        try:
-            img = Image.open(BytesIO(file_bytes))
-            width, height = img.size
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid image file",
-            ) from exc
-
-        if height == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid image dimensions",
-            )
-
-        ratio = width / height
-
-        if (
-            (platform == "app" or placement.strip() == "hero")
-            and abs(ratio - (7 / 3)) > 0.03
+        if image is None and (
+            placement.strip() != "hero"
+            or not (title or "").strip()
         ):
             raise HTTPException(
                 status_code=400,
-                detail="Banner image must use a 7:3 aspect ratio",
+                detail="An image is required unless this is a text-only hero banner.",
             )
 
-        extension = (
-            image.filename.split(".")[-1].lower()
-            if image.filename and "." in image.filename
-            else "png"
-        )
+        image_url = None
+        storage_path = None
+        if image is not None:
+            allowed_types = {
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+            }
 
-        storage_folder = {
-            ("web", "hero"): "banners/web/hero",
-            ("web", "main-promo-banner"): "main-promo-banner",
-            ("web", "shop-by-need"): "shop-by-need",
-        }.get(
-            (platform, placement.strip()),
-            f"banners/{platform}/{placement.strip()}",
-        )
-        storage_path = f"{storage_folder}/{uuid4()}.{extension}"
+            if image.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only JPG, PNG, and WEBP images are allowed",
+                )
 
-        supabase.storage.from_("site_assets").upload(
-            storage_path,
-            file_bytes,
-            {
-                "content-type": image.content_type,
-                "upsert": "false",
-            },
-        )
+            file_bytes = await image.read()
 
-        image_url = (
-            supabase
-            .storage
-            .from_("site_assets")
-            .get_public_url(storage_path)
-        )
+            if not file_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Banner image is empty",
+                )
+
+            try:
+                img = Image.open(BytesIO(file_bytes))
+                width, height = img.size
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid image file",
+                ) from exc
+
+            if height == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid image dimensions",
+                )
+
+            required_ratio = (
+                7 / 3
+                if platform == "app"
+                else 4.4
+                if placement.strip() == "hero"
+                else None
+            )
+            if (
+                required_ratio
+                and abs(width / height - required_ratio) > 0.03
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Web hero banner image must use a 4.4:1 aspect ratio"
+                        if platform == "web"
+                        else "Banner image must use a 7:3 aspect ratio"
+                    ),
+                )
+
+            extension = (
+                image.filename.split(".")[-1].lower()
+                if image.filename and "." in image.filename
+                else "png"
+            )
+
+            storage_folder = {
+                ("web", "hero"): "banners/web/hero",
+                ("web", "main-promo-banner"): "main-promo-banner",
+                ("web", "shop-by-need"): "shop-by-need",
+            }.get(
+                (platform, placement.strip()),
+                f"banners/{platform}/{placement.strip()}",
+            )
+            storage_path = f"{storage_folder}/{uuid4()}.{extension}"
+
+            supabase.storage.from_("site_assets").upload(
+                storage_path,
+                file_bytes,
+                {
+                    "content-type": image.content_type,
+                    "upsert": "false",
+                },
+            )
+
+            image_url = (
+                supabase
+                .storage
+                .from_("site_assets")
+                .get_public_url(storage_path)
+            )
 
         banner_title = (
             title
@@ -265,18 +294,35 @@ async def create_banner(
         metadata = {
             "display_location": display_location or banner_title,
         }
-        if platform == "app" or placement.strip() == "hero":
+        if eyebrow is not None:
+            metadata["eyebrow"] = eyebrow
+        if heading_line2 is not None:
+            metadata["heading_line2"] = heading_line2
+        if primary_cta_text is not None:
+            metadata["primary_cta_text"] = primary_cta_text
+        if benefit_one is not None:
+            metadata["benefit_one"] = benefit_one
+        if benefit_two is not None:
+            metadata["benefit_two"] = benefit_two
+        if placement.strip() == "main-promo-banner":
+            metadata["custom_copy"] = True
+        if image is not None and platform == "app":
             metadata["aspect_ratio"] = "7:3"
+        elif image is not None and placement.strip() == "hero":
+            metadata["aspect_ratio"] = "4.4:1"
 
         banner_data = {
             "platform": platform,
             "placement": placement.strip(),
             "title": banner_title,
+            "subtitle": subtitle or None,
+            "description": description or None,
             "image_url": image_url,
             "storage_path": storage_path,
             "target_type": "home",
             "target_id": None,
             "category_id": None,
+            "target_url": target_url or None,
             "sort_order": banner_sort_order,
             "is_visible": publish_status == "published",
             "publish_status": publish_status,
@@ -313,6 +359,13 @@ async def create_banner(
 async def update_banner(
     banner_id: str,
     title: str | None = Form(default=None),
+    subtitle: str | None = Form(default=None),
+    description: str | None = Form(default=None),
+    eyebrow: str | None = Form(default=None),
+    heading_line2: str | None = Form(default=None),
+    primary_cta_text: str | None = Form(default=None),
+    benefit_one: str | None = Form(default=None),
+    benefit_two: str | None = Form(default=None),
     target_type: str | None = Form(default=None),
     target_id: str | None = Form(default=None),
     target_url: str | None = Form(default=None),
@@ -324,6 +377,7 @@ async def update_banner(
     starts_at: str | None = Form(default=None),
     ends_at: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    remove_image: bool = Form(default=False),
 ):
     try:
         existing_result = (
@@ -354,6 +408,31 @@ async def update_banner(
 
         if title is not None:
             update_data["title"] = title
+
+        if subtitle is not None:
+            update_data["subtitle"] = subtitle or None
+
+        if description is not None:
+            update_data["description"] = description or None
+
+        metadata_updates = {}
+        if eyebrow is not None:
+            metadata_updates["eyebrow"] = eyebrow
+        if heading_line2 is not None:
+            metadata_updates["heading_line2"] = heading_line2
+        if primary_cta_text is not None:
+            metadata_updates["primary_cta_text"] = primary_cta_text
+        if benefit_one is not None:
+            metadata_updates["benefit_one"] = benefit_one
+        if benefit_two is not None:
+            metadata_updates["benefit_two"] = benefit_two
+        if placement == "main-promo-banner":
+            metadata_updates["custom_copy"] = True
+        if metadata_updates:
+            update_data["metadata"] = {
+                **(existing.get("metadata") or {}),
+                **metadata_updates,
+            }
 
         if target_type is not None:
             update_data["target_type"] = target_type
@@ -417,6 +496,30 @@ async def update_banner(
         if ends_at is not None:
             update_data["ends_at"] = ends_at or None
 
+        if remove_image:
+            if platform != "web" or placement != "hero":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only Web Hero banners can be changed to text-only.",
+                )
+            if image is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Choose either a replacement image or text-only mode.",
+                )
+            text_title = (
+                title
+                if title is not None
+                else existing.get("title")
+            )
+            if not (text_title or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Text-only hero banners require a title.",
+                )
+            update_data["image_url"] = None
+            update_data["storage_path"] = None
+
         new_storage_path = None
 
         if image is not None:
@@ -458,8 +561,10 @@ async def update_banner(
             required_ratio = (
                 3.0
                 if platform == "app" and placement == "category"
-                else (7 / 3)
-                if platform == "app" or placement == "hero"
+                else 7 / 3
+                if platform == "app"
+                else 4.4
+                if placement == "hero"
                 else None
             )
             if required_ratio and abs(width / height - required_ratio) > 0.03:
@@ -468,6 +573,8 @@ async def update_banner(
                     detail=(
                         "Category banner image must use a 3:1 aspect ratio"
                         if required_ratio == 3.0
+                        else "Web hero banner image must use a 4.4:1 aspect ratio"
+                        if platform == "web"
                         else "Banner image must use a 7:3 aspect ratio"
                     ),
                 )
@@ -543,6 +650,12 @@ async def update_banner(
                 old_storage_path
                 and old_storage_folder
                 and old_storage_path.startswith(f"{old_storage_folder}/")
+            ):
+                delete_storage_file(old_storage_path)
+        elif remove_image:
+            old_storage_path = existing.get("storage_path")
+            if old_storage_path and old_storage_path.startswith(
+                "banners/web/hero/"
             ):
                 delete_storage_file(old_storage_path)
 
