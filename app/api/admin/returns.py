@@ -60,6 +60,185 @@ class ReturnStatusUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+def add_return_request_details(return_requests: list[dict]) -> list[dict]:
+    if not return_requests:
+        return return_requests
+
+    order_item_ids = sorted({
+        str(item["order_item_id"])
+        for item in return_requests
+        if item.get("order_item_id")
+    })
+    order_items_by_id = {}
+
+    if order_item_ids:
+        order_items_result = (
+            supabase.table("order_items")
+            .select(
+                "id, order_id, product_id, product_name, variant_name, "
+                "unit_price, total_price, quantity"
+            )
+            .in_("id", order_item_ids)
+            .execute()
+        )
+        order_items_by_id = {
+            str(item["id"]): item
+            for item in order_items_result.data or []
+        }
+
+    order_ids = sorted({
+        str(value)
+        for item in return_requests
+        for value in (
+            item.get("order_id"),
+            order_items_by_id.get(
+                str(item.get("order_item_id") or ""),
+                {},
+            ).get("order_id"),
+        )
+        if value
+    })
+    product_ids = sorted({
+        str(value)
+        for item in return_requests
+        for value in (
+            item.get("product_id"),
+            order_items_by_id.get(
+                str(item.get("order_item_id") or ""),
+                {},
+            ).get("product_id"),
+        )
+        if value
+    })
+    customer_ids = sorted({
+        str(item["customer_id"])
+        for item in return_requests
+        if item.get("customer_id")
+    })
+
+    orders_by_id = {}
+    if order_ids:
+        orders_result = (
+            supabase.table("orders")
+            .select("id, order_number")
+            .in_("id", order_ids)
+            .execute()
+        )
+        orders_by_id = {
+            str(order["id"]): order
+            for order in orders_result.data or []
+        }
+
+    products_by_id = {}
+    product_images_by_id = {}
+    if product_ids:
+        products_result = (
+            supabase.table("products")
+            .select("id, name")
+            .in_("id", product_ids)
+            .execute()
+        )
+        products_by_id = {
+            str(product["id"]): product
+            for product in products_result.data or []
+        }
+
+        images_result = (
+            supabase.table("product_images")
+            .select("product_id, image_url, is_primary, sort_order")
+            .in_("product_id", product_ids)
+            .execute()
+        )
+        for image in images_result.data or []:
+            product_images_by_id.setdefault(
+                str(image["product_id"]),
+                [],
+            ).append(image)
+
+    customers_by_id = {}
+    if customer_ids:
+        customers_result = (
+            supabase.table("profiles")
+            .select("id, full_name, email")
+            .in_("id", customer_ids)
+            .execute()
+        )
+        customers_by_id = {
+            str(customer["id"]): customer
+            for customer in customers_result.data or []
+        }
+
+    for request in return_requests:
+        order_item = order_items_by_id.get(
+            str(request.get("order_item_id") or ""),
+            {},
+        )
+        order_id = str(
+            request.get("order_id") or order_item.get("order_id") or ""
+        )
+        order = orders_by_id.get(order_id)
+        product_id = str(
+            request.get("product_id") or order_item.get("product_id") or ""
+        )
+        product = products_by_id.get(product_id, {})
+        images = product_images_by_id.get(product_id, [])
+        primary_image = next(
+            (
+                image
+                for image in images
+                if image.get("is_primary") and image.get("image_url")
+            ),
+            None,
+        )
+        if primary_image is None:
+            primary_image = min(
+                (
+                    image
+                    for image in images
+                    if image.get("image_url")
+                ),
+                key=lambda image: int(image.get("sort_order") or 0),
+                default=None,
+            )
+
+        customer_id = str(request.get("customer_id") or "")
+        customer = customers_by_id.get(customer_id)
+        product_name = (
+            request.get("product_name")
+            or order_item.get("product_name")
+            or product.get("name")
+        )
+        product_image_url = (
+            request.get("product_image_url")
+            or (primary_image or {}).get("image_url")
+        )
+
+        request["order_item"] = order_item or None
+        request["order"] = order
+        request["order_number"] = (
+            (order or {}).get("order_number")
+            or request.get("order_number")
+        )
+        request["product"] = {
+            "id": product_id or None,
+            "name": product_name,
+            "image_url": product_image_url,
+        }
+        request["product_name"] = product_name
+        request["product_image_url"] = product_image_url
+        request["customer"] = customer
+        request["customer_name"] = (
+            (customer or {}).get("full_name")
+            or request.get("customer_name")
+        )
+        request["customer_email"] = (
+            (customer or {}).get("email")
+            or request.get("customer_email")
+        )
+
+    return return_requests
+
+
 @router.get("")
 def list_return_requests(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -82,9 +261,10 @@ def list_return_requests(
             .range(offset, offset + limit - 1)
             .execute()
         )
+        items = add_return_request_details(result.data or [])
 
         return {
-            "items": result.data or [],
+            "items": items,
             "total": result.count or 0,
             "limit": limit,
             "offset": offset,

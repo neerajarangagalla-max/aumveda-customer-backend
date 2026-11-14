@@ -129,7 +129,7 @@ def create_review(
                 if payload.review_text
                 else None
             ),
-            "status": "pending",
+            "status": "approved",
         }
 
         result = (
@@ -146,13 +146,13 @@ def create_review(
 
         return {
             "status": "success",
-            "message": "Review submitted and awaiting approval.",
+            "message": "Your review is published and now visible.",
             "data": result.data[0],
         }
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to submit product review")
         raise HTTPException(
             status_code=500,
@@ -166,10 +166,9 @@ def get_product_reviews(product_id: UUID):
         result = (
             supabase.table("product_reviews")
             .select(
-                "id, product_id, customer_id, rating, title, review_text, created_at"
+                "id, product_id, rating, title, review_text, created_at"
             )
             .eq("product_id", str(product_id))
-            .eq("status", "approved")
             .order("created_at", desc=True)
             .execute()
         )
@@ -180,7 +179,7 @@ def get_product_reviews(product_id: UUID):
             "data": result.data or [],
         }
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to retrieve product reviews")
         raise HTTPException(
             status_code=500,

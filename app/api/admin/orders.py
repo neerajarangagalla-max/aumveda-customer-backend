@@ -44,10 +44,117 @@ ALLOWED_ORDER_TRANSITIONS = {
 }
 
 
+def add_order_item_products(orders: list[dict]) -> list[dict]:
+    if not orders:
+        return orders
+
+    order_ids = [
+        str(order["id"])
+        for order in orders
+        if order.get("id")
+    ]
+    if not order_ids:
+        for order in orders:
+            order["order_items"] = []
+        return orders
+
+    order_items_result = (
+        supabase.table("order_items")
+        .select(
+            "id, order_id, product_id, product_name, variant_name, "
+            "quantity, unit_price, total_price"
+        )
+        .in_("order_id", order_ids)
+        .execute()
+    )
+    order_items = order_items_result.data or []
+
+    product_ids = list({
+        str(item["product_id"])
+        for item in order_items
+        if item.get("product_id")
+    })
+    products_by_id = {}
+    images_by_product_id = {}
+
+    if product_ids:
+        products_result = (
+            supabase.table("products")
+            .select("id, name")
+            .in_("id", product_ids)
+            .execute()
+        )
+        products_by_id = {
+            str(product["id"]): product
+            for product in products_result.data or []
+        }
+
+        images_result = (
+            supabase.table("product_images")
+            .select("product_id, image_url, is_primary, sort_order")
+            .in_("product_id", product_ids)
+            .execute()
+        )
+        for image in images_result.data or []:
+            images_by_product_id.setdefault(
+                str(image["product_id"]),
+                [],
+            ).append(image)
+
+    items_by_order_id = {}
+    for item in order_items:
+        product_id = str(item.get("product_id") or "")
+        product = products_by_id.get(product_id) or {}
+        images = images_by_product_id.get(product_id, [])
+        primary_image = next(
+            (
+                image
+                for image in images
+                if image.get("is_primary") and image.get("image_url")
+            ),
+            None,
+        )
+        if primary_image is None:
+            primary_image = min(
+                (
+                    image
+                    for image in images
+                    if image.get("image_url")
+                ),
+                key=lambda image: int(image.get("sort_order") or 0),
+                default=None,
+            )
+
+        item["product_name"] = (
+            item.get("product_name") or product.get("name")
+        )
+        item["image_url"] = (
+            primary_image.get("image_url")
+            if primary_image
+            else None
+        )
+        items_by_order_id.setdefault(
+            str(item.get("order_id")),
+            [],
+        ).append(item)
+
+    for order in orders:
+        order["order_items"] = items_by_order_id.get(
+            str(order.get("id")),
+            [],
+        )
+
+    return orders
+
+
 
 @router.get("")
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),
+    payment_method_filter: Literal["cod", "online"] | None = Query(
+        default=None,
+        alias="payment_method",
+    ),
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -57,6 +164,8 @@ def list_orders(
 
         if status_filter:
             query = query.eq("status", status_filter)
+        if payment_method_filter:
+            query = query.eq("payment_method", payment_method_filter)
         if search and search.strip():
             query = query.ilike("order_number", f"%{search.strip()}%")
         result = (
@@ -64,9 +173,10 @@ def list_orders(
             .range(offset, offset + limit - 1)
             .execute()
         )
+        orders = add_order_item_products(result.data or [])
 
         return {
-            "items": result.data or [],
+            "items": orders,
             "total": result.count or 0,
             "limit": limit,
             "offset": offset,
@@ -83,7 +193,7 @@ def get_order(order_id: str):
     try:
         result = (
             supabase.table("orders")
-            .select("*, order_items(*)")
+            .select("*")
             .eq("id", order_id)
             .maybe_single()
             .execute()
@@ -92,7 +202,7 @@ def get_order(order_id: str):
         if not result.data:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        return result.data
+        return add_order_item_products([result.data])[0]
     except HTTPException:
         raise
     except Exception as exc:
