@@ -73,14 +73,32 @@ def list_products(
         default=None, alias="status"
     ),
     search: str | None = None,
+    category_id: UUID | None = None,
+    vendor_id: UUID | None = None,
+    featured: bool | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
     try:
-        query = supabase.table("products").select("*", count="exact")
+        query = supabase.table("products").select(
+            "*, "
+            "categories(name), "
+            "product_images(image_url, is_primary, sort_order), "
+            "product_variants(price, stock_quantity, is_active)",
+            count="exact",
+        )
 
         if status_filter:
             query = query.eq("status", status_filter)
+
+        if category_id:
+            query = query.eq("category_id", str(category_id))
+
+        if vendor_id:
+            query = query.eq("vendor_id", str(vendor_id))
+
+        if featured is not None:
+            query = query.eq("is_featured", featured)
 
         if search and search.strip():
             query = query.ilike("name", f"%{search.strip()}%")
@@ -90,9 +108,59 @@ def list_products(
             .range(offset, offset + limit - 1)
             .execute()
         )
+        items = []
+        for product in result.data or []:
+            item = dict(product)
+            images = item.get("product_images") or []
+            variants = item.get("product_variants") or []
+            category = item.get("categories")
+
+            if isinstance(category, list):
+                category = category[0] if category else None
+
+            primary_image = next(
+                (
+                    image
+                    for image in images
+                    if image.get("is_primary") and image.get("image_url")
+                ),
+                None,
+            )
+            if primary_image is None:
+                available_images = [
+                    image for image in images if image.get("image_url")
+                ]
+                primary_image = min(
+                    available_images,
+                    key=lambda image: int(image.get("sort_order") or 0),
+                    default=None,
+                )
+
+            variant = next(
+                (
+                    entry
+                    for entry in variants
+                    if entry.get("is_active") is not False
+                ),
+                variants[0] if variants else None,
+            )
+
+            item["primary_image_url"] = (
+                primary_image.get("image_url")
+                if primary_image
+                else None
+            )
+            item["category_name"] = (
+                category.get("name") if isinstance(category, dict) else None
+            )
+            item["price"] = variant.get("price") if variant else None
+            item["stock_quantity"] = (
+                variant.get("stock_quantity") if variant else None
+            )
+            items.append(item)
 
         return {
-            "items": result.data or [],
+            "items": items,
             "total": result.count or 0,
             "limit": limit,
             "offset": offset,
