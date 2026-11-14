@@ -159,7 +159,7 @@ def add_return_request_details(return_requests: list[dict]) -> list[dict]:
     if customer_ids:
         customers_result = (
             supabase.table("profiles")
-            .select("id, full_name, email")
+            .select("id, full_name")
             .in_("id", customer_ids)
             .execute()
         )

@@ -69,6 +69,24 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
     )
     order_items = order_items_result.data or []
 
+    customer_ids = list({
+        str(order["customer_id"])
+        for order in orders
+        if order.get("customer_id")
+    })
+    customers_by_id = {}
+    if customer_ids:
+        customers_result = (
+            supabase.table("profiles")
+            .select("id, full_name")
+            .in_("id", customer_ids)
+            .execute()
+        )
+        customers_by_id = {
+            str(customer["id"]): customer
+            for customer in customers_result.data or []
+        }
+
     product_ids = list({
         str(item["product_id"])
         for item in order_items
@@ -139,6 +157,10 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
         ).append(item)
 
     for order in orders:
+        customer = customers_by_id.get(
+            str(order.get("customer_id") or "")
+        ) or {}
+        order["customer_name"] = customer.get("full_name")
         order["order_items"] = items_by_order_id.get(
             str(order.get("id")),
             [],
