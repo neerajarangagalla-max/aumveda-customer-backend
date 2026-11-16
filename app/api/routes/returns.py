@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.api.routes.orders import get_current_customer_id
 from app.core.supabase import supabase
+from app.services.customer_notifications import create_customer_notification
 
 logger = logging.getLogger(__name__)
 def execute_read_with_retry(query_factory, attempts=3):
@@ -112,6 +113,26 @@ def create_return_request(
                     "Unable to create return request.",
                 ),
             )
+
+        return_request = data.get("return_request")
+        request_label = (
+            "exchange"
+            if payload.request_type == "replacement"
+            else "return"
+        )
+        create_customer_notification(
+            customer_id=customer_id,
+            title=f"{request_label.title()} request submitted",
+            message=f"Your {request_label} request has been submitted.",
+            notification_type=f"{request_label}_request_submitted",
+            reference_type="return_request",
+            reference_id=(
+                str(return_request.get("id"))
+                if isinstance(return_request, dict)
+                and return_request.get("id")
+                else None
+            ),
+        )
 
         return {
             "message": data.get(

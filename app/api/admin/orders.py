@@ -10,6 +10,7 @@ from reportlab.pdfgen import canvas
 
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
+from app.services.customer_notifications import create_customer_notification
 import logging
 
 logger = logging.getLogger(__name__)
@@ -458,7 +459,7 @@ def update_order_status(
     try:
         existing = (
             supabase.table("orders")
-            .select("id, status")
+            .select("id, status, customer_id, order_number")
             .eq("id", order_id)
             .maybe_single()
             .execute()
@@ -547,6 +548,17 @@ def update_order_status(
                     "Please verify the order and its history."
                 ),
             ) from update_error
+
+        order_number = existing.data.get("order_number") or order_id
+        display_status = new_status.replace("_", " ").title()
+        create_customer_notification(
+            customer_id=existing.data.get("customer_id"),
+            title="Order status update",
+            message=f"Order {order_number} is now {display_status}.",
+            notification_type=f"order_status_{new_status}",
+            reference_type="order",
+            reference_id=order_id,
+        )
 
         return {
             "message": "Order status updated and history recorded",

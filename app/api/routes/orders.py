@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.supabase import supabase
+from app.services.customer_notifications import create_customer_notification
 
 
 # ============================================================
@@ -219,6 +220,17 @@ def create_order(
             order = order[0]
 
         create_admin_order_notification(order)
+        create_customer_notification(
+            customer_id=order.get("customer_id"),
+            title="Order placed",
+            message=(
+                f"Your order {order.get('order_number') or order.get('id')} "
+                "was placed successfully."
+            ),
+            notification_type="order_placed",
+            reference_type="order",
+            reference_id=order.get("id"),
+        )
 
         return {
             "status": "success",
@@ -349,6 +361,18 @@ def create_buy_now_order(
 
             if created_order:
                 create_admin_order_notification(created_order)
+                create_customer_notification(
+                    customer_id=created_order.get("customer_id"),
+                    title="Order placed",
+                    message=(
+                        "Your order "
+                        f"{created_order.get('order_number') or created_order.get('id')} "
+                        "was placed successfully."
+                    ),
+                    notification_type="order_placed",
+                    reference_type="order",
+                    reference_id=created_order.get("id"),
+                )
 
         except Exception:
             # Notification failure must never fail the order.

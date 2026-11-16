@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import get_current_admin
 from app.core.supabase import supabase
+from app.services.customer_notifications import create_customer_notification
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,36 @@ def ensure_vendor_approval_notification(return_request: dict) -> None:
         }
         for member_id in missing_member_ids
     ]).execute()
+
+
+def notify_customer_return_status(return_request: dict) -> None:
+    request_id = return_request.get("id")
+    request_type = return_request.get("request_type") or "return"
+    is_exchange = request_type == "replacement"
+    status_value = return_request.get("status") or "updated"
+    request_label = "exchange" if is_exchange else "return"
+    status_message = {
+        "under_review": "is being reviewed",
+        "approved": "has been approved",
+        "rejected": "was declined",
+        "pickup_scheduled": "has a pickup scheduled",
+        "item_received": "has been received",
+        "replacement_processing": "is being prepared",
+        "refund_processing": "has entered refund processing",
+        "completed": "is complete",
+        "cancelled": "was cancelled",
+    }.get(status_value, status_value.replace("_", " "))
+
+    create_customer_notification(
+        customer_id=return_request.get("customer_id"),
+        title=f"{request_label.title()} request update",
+        message=f"Your {request_label} request {status_message}.",
+        notification_type=(
+            f"{'exchange' if is_exchange else 'return'}_request_{status_value}"
+        ),
+        reference_type="return_request",
+        reference_id=str(request_id) if request_id else None,
+    )
 
 
 def add_return_request_details(return_requests: list[dict]) -> list[dict]:
@@ -490,6 +521,7 @@ def update_return_status(
                 updated_request = rpc_data.get("return_request")
 
                 if updated_request:
+                    notify_customer_return_status(updated_request)
                     return {
                         "message": rpc_data.get(
                             "message",
@@ -557,7 +589,10 @@ def update_return_status(
             )
 
         if new_status == "approved":
+            notify_customer_return_status(updated_rows[0])
             ensure_vendor_approval_notification(updated_rows[0])
+        else:
+            notify_customer_return_status(updated_rows[0])
 
         return {
             "message": "Return request status updated.",

@@ -30,6 +30,7 @@ from app.api.routes import (
     health,
     home,
     orders,
+    notifications,
     products,
     profile,
     returns,
@@ -61,6 +62,7 @@ api_router.include_router(addresses.router)
 api_router.include_router(wishlist.router)
 api_router.include_router(cart.router)
 api_router.include_router(orders.router)
+api_router.include_router(notifications.router)
 api_router.include_router(admin_product_images.router)
 api_router.include_router(support.router)
 api_router.include_router(site_settings.router)
