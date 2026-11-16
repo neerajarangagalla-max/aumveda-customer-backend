@@ -17,6 +17,7 @@ router = APIRouter(
 @router.get("")
 def list_customer_notifications(
     limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
     customer_id: str = Depends(get_current_customer_id),
 ):
     try:
@@ -30,7 +31,7 @@ def list_customer_notifications(
             .eq("recipient_id", str(customer_id))
             .eq("recipient_role", "customer")
             .order("created_at", desc=True)
-            .range(0, limit - 1)
+            .range(offset, offset + limit - 1)
             .execute()
         )
         unread_result = (
@@ -47,6 +48,8 @@ def list_customer_notifications(
             "items": notifications_result.data or [],
             "total": notifications_result.count or 0,
             "unread_count": unread_result.count or 0,
+            "limit": limit,
+            "offset": offset,
         }
 
     except Exception as exc:

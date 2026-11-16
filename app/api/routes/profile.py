@@ -24,19 +24,42 @@ def _get_profile(user_id: str):
     return data[0] if data else None
 
 
-def _update_profile(user_id: str, payload: dict):
-    clean_payload = {
-        key: value
-        for key, value in payload.items()
-        if value is not None
+def _get_customer_profile(user_id: str):
+    response = (
+        supabase_admin.table("customer_profiles")
+        .select("date_of_birth, gender, marketing_opt_in")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+
+    data = response.data or []
+    return data[0] if data else {}
+
+
+def _get_complete_profile(user_id: str):
+    profile = _get_profile(user_id)
+    if profile is None:
+        return None
+
+    customer_profile = _get_customer_profile(user_id)
+    return {
+        **profile,
+        "date_of_birth": customer_profile.get("date_of_birth"),
+        "gender": customer_profile.get("gender"),
+        "marketing_opt_in": bool(
+            customer_profile.get("marketing_opt_in", False)
+        ),
     }
 
-    if not clean_payload:
+
+def _update_profile(user_id: str, payload: dict):
+    if not payload:
         return _get_profile(user_id)
 
     response = (
         supabase_admin.table("profiles")
-        .update(clean_payload)
+        .update(payload)
         .eq("id", user_id)
         .execute()
     )
@@ -48,7 +71,7 @@ def _update_profile(user_id: str, payload: dict):
 @router.get("")
 async def profile(user=Depends(get_current_user)):
     try:
-        data = _get_profile(user.id)
+        data = _get_complete_profile(user.id)
 
         if data is None:
             raise HTTPException(
@@ -78,19 +101,45 @@ async def update(
     user=Depends(get_current_user),
 ):
     try:
-        update_data = payload.model_dump(exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True, mode="json")
 
         # Keep both name fields consistent when either is provided.
         if "name" in update_data:
             update_data["full_name"] = update_data.pop("name")
 
-        data = _update_profile(user.id, update_data)
+        customer_profile_fields = {
+            "date_of_birth",
+            "gender",
+            "marketing_opt_in",
+        }
+        customer_profile_data = {
+            key: update_data.pop(key)
+            for key in customer_profile_fields
+            if key in update_data
+        }
 
-        if data is None:
+        updated_profile = _update_profile(user.id, update_data)
+
+        if updated_profile is None:
             raise HTTPException(
                 status_code=404,
                 detail="Profile not found.",
             )
+
+        if customer_profile_data:
+            (
+                supabase_admin.table("customer_profiles")
+                .upsert(
+                    {
+                        "user_id": user.id,
+                        **customer_profile_data,
+                    },
+                    on_conflict="user_id",
+                )
+                .execute()
+            )
+
+        data = _get_complete_profile(user.id)
 
         return {
             "status": "success",

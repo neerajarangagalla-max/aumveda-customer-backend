@@ -20,7 +20,8 @@ from fastapi.security import (
     HTTPBearer,
 )
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from decimal import Decimal
 
 from app.core.config import settings
 from app.core.supabase import supabase
@@ -50,6 +51,23 @@ security = HTTPBearer(
 class CreateOrderRequest(BaseModel):
     address_id: UUID
     payment_method: Literal["cod", "online"] = "cod"
+    coupon_code: str | None = Field(default=None, min_length=3, max_length=40)
+    coupon_placement: Literal["cart", "checkout"] | None = None
+
+    @field_validator("coupon_code")
+    @classmethod
+    def normalize_coupon_code(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
+
+
+class ValidateCouponRequest(BaseModel):
+    code: str = Field(min_length=3, max_length=40)
+    placement: Literal["cart", "checkout"]
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return value.strip().upper()
 
 
 class CreateBuyNowOrderRequest(BaseModel):
@@ -179,6 +197,135 @@ def get_current_customer_id(
 # CREATE CART ORDER
 # ============================================================
 
+def get_customer_cart_subtotal(customer_id: str) -> Decimal:
+    cart_response = (
+        supabase
+        .table("carts")
+        .select("id")
+        .eq("customer_id", customer_id)
+        .order("updated_at", desc=True)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    carts = cart_response.data or []
+
+    if not carts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your cart is empty.",
+        )
+
+    item_response = (
+        supabase
+        .table("cart_items")
+        .select("variant_id,quantity")
+        .eq("cart_id", carts[0]["id"])
+        .execute()
+    )
+    items = item_response.data or []
+
+    if not items:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your cart is empty.",
+        )
+
+    variant_ids = list({
+        item.get("variant_id")
+        for item in items
+        if item.get("variant_id")
+    })
+    if not variant_ids:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your cart contains an unavailable product.",
+        )
+
+    variant_response = (
+        supabase
+        .table("product_variants")
+        .select("id,price")
+        .in_("id", variant_ids)
+        .execute()
+    )
+    prices = {
+        str(variant["id"]): Decimal(str(variant["price"]))
+        for variant in (variant_response.data or [])
+        if variant.get("price") is not None
+    }
+
+    subtotal = Decimal("0")
+    for item in items:
+        variant_id = str(item.get("variant_id") or "")
+        quantity = item.get("quantity")
+        price = prices.get(variant_id)
+
+        if not price or not isinstance(quantity, int) or quantity <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Your cart contains an unavailable product.",
+            )
+
+        subtotal += price * quantity
+
+    return subtotal.quantize(Decimal("0.01"))
+
+
+@router.post("/coupons/validate")
+def validate_customer_coupon(
+    payload: ValidateCouponRequest,
+    customer_id: str = Depends(get_current_customer_id),
+):
+    try:
+        subtotal = get_customer_cart_subtotal(customer_id)
+        response = (
+            supabase
+            .rpc(
+                "validate_customer_coupon",
+                {
+                    "p_customer_id": customer_id,
+                    "p_coupon_code": payload.code,
+                    "p_coupon_placement": payload.placement,
+                    "p_subtotal": str(subtotal),
+                    "p_exclude_order_id": None,
+                },
+            )
+            .execute()
+        )
+
+        quote = response.data
+        if isinstance(quote, list):
+            quote = quote[0] if quote else None
+
+        if not isinstance(quote, dict):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Coupon validation returned no data.",
+            )
+
+        if quote.get("valid") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=quote.get("message") or "This coupon cannot be applied.",
+            )
+
+        return {
+            "status": "success",
+            "data": quote,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        logger.exception("Failed to validate coupon")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to validate this coupon. Please try again.",
+        ) from error
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -187,6 +334,11 @@ def create_order(
     payload: CreateOrderRequest,
     customer_id: str = Depends(get_current_customer_id),
 ):
+    if bool(payload.coupon_code) != bool(payload.coupon_placement):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Coupon code and placement must be provided together.",
+        )
 
     try:
         response = (
@@ -197,6 +349,8 @@ def create_order(
                     "p_customer_id": customer_id,
                     "p_address_id": str(payload.address_id),
                     "p_payment_method": payload.payment_method,
+                    "p_coupon_code": payload.coupon_code,
+                    "p_coupon_placement": payload.coupon_placement,
                 },
             )
             .execute()
@@ -275,6 +429,12 @@ def create_order(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid payment method.",
+            )
+
+        if "coupon" in lower_message:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=message,
             )
 
         if (
