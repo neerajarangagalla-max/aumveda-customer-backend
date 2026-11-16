@@ -185,3 +185,67 @@ def get_product_reviews(product_id: UUID):
             status_code=500,
             detail="Unable to retrieve product reviews.",
         ) from exc
+
+
+@router.get("/order/{order_id}")
+def get_customer_order_reviews(
+    order_id: UUID,
+    customer_id: str = Depends(get_current_customer_id),
+):
+    try:
+        order_result = (
+            supabase.table("orders")
+            .select("id")
+            .eq("id", str(order_id))
+            .eq("customer_id", str(customer_id))
+            .limit(1)
+            .execute()
+        )
+
+        if not order_result.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found.",
+            )
+
+        order_items_result = (
+            supabase.table("order_items")
+            .select("id")
+            .eq("order_id", str(order_id))
+            .execute()
+        )
+        order_item_ids = [
+            str(item["id"])
+            for item in order_items_result.data or []
+            if item.get("id")
+        ]
+
+        reviews = []
+        if order_item_ids:
+            reviews_result = (
+                supabase.table("product_reviews")
+                .select(
+                    "id, order_item_id, product_id, rating, title, "
+                    "review_text, created_at"
+                )
+                .eq("customer_id", str(customer_id))
+                .in_("order_item_id", order_item_ids)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            reviews = reviews_result.data or []
+
+        return {
+            "status": "success",
+            "count": len(reviews),
+            "data": reviews,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to retrieve customer order reviews")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve order reviews.",
+        ) from exc
