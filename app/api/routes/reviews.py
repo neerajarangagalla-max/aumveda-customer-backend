@@ -5,7 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.api.routes.orders import get_current_customer_id
+from app.api.routes.orders import (
+    execute_supabase_read,
+    get_current_customer_id,
+)
 from app.core.supabase import supabase
 
 router = APIRouter(
@@ -193,13 +196,12 @@ def get_customer_order_reviews(
     customer_id: str = Depends(get_current_customer_id),
 ):
     try:
-        order_result = (
+        order_result = execute_supabase_read(
             supabase.table("orders")
             .select("id")
             .eq("id", str(order_id))
             .eq("customer_id", str(customer_id))
             .limit(1)
-            .execute()
         )
 
         if not order_result.data:
@@ -208,11 +210,10 @@ def get_customer_order_reviews(
                 detail="Order not found.",
             )
 
-        order_items_result = (
+        order_items_result = execute_supabase_read(
             supabase.table("order_items")
             .select("id")
             .eq("order_id", str(order_id))
-            .execute()
         )
         order_item_ids = [
             str(item["id"])
@@ -222,7 +223,7 @@ def get_customer_order_reviews(
 
         reviews = []
         if order_item_ids:
-            reviews_result = (
+            reviews_result = execute_supabase_read(
                 supabase.table("product_reviews")
                 .select(
                     "id, order_item_id, product_id, rating, title, "
@@ -231,7 +232,6 @@ def get_customer_order_reviews(
                 .eq("customer_id", str(customer_id))
                 .in_("order_item_id", order_item_ids)
                 .order("created_at", desc=True)
-                .execute()
             )
             reviews = reviews_result.data or []
 
