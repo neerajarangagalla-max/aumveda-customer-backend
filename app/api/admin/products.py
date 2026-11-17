@@ -1,4 +1,3 @@
-
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -22,28 +21,11 @@ ProductStatus = Literal[
     "draft", "pending", "active", "rejected", "archived"
 ]
 
+ApprovalStatus = Literal[
+    "pending", "approved", "rejected"
+]
 
-def _database_error(exc: Exception) -> HTTPException:
-    message = str(exc).lower()
 
-    if "product_not_found" in message:
-        return HTTPException(404, "Product not found")
-
-    if "duplicate key" in message or "unique constraint" in message:
-        return HTTPException(
-            409, "A product slug or variant SKU already exists"
-        )
-
-    if (
-        "foreign key" in message
-        or "invalid input syntax for type uuid" in message
-    ):
-        return HTTPException(400, "Invalid product, vendor, or category ID")
-
-    if "compare-at price" in message or "primary image" in message:
-        return HTTPException(422, str(exc))
-
-    return HTTPException(500, "Product operation failed")
 def _database_error(exc: Exception) -> HTTPException:
     print("PRODUCT DATABASE ERROR:", repr(exc))
 
@@ -54,23 +36,38 @@ def _database_error(exc: Exception) -> HTTPException:
 
     if "duplicate key" in message or "unique constraint" in message:
         return HTTPException(
-            409, "A product slug or variant SKU already exists"
+            409,
+            "A product slug or variant SKU already exists",
         )
 
     if (
         "foreign key" in message
         or "invalid input syntax for type uuid" in message
     ):
-        return HTTPException(400, "Invalid product, vendor, or category ID")
+        return HTTPException(
+            400,
+            "Invalid product, vendor, or category ID",
+        )
 
     if "compare-at price" in message or "primary image" in message:
         return HTTPException(422, str(exc))
 
     return HTTPException(500, "Product operation failed")
+
+
+# ---------------------------------------------------------
+# LIST PRODUCTS
+# ---------------------------------------------------------
+
 @router.get("")
 def list_products(
     status_filter: ProductStatus | None = Query(
-        default=None, alias="status"
+        default=None,
+        alias="status",
+    ),
+    approval_status: ApprovalStatus | None = Query(
+        default=None,
+        alias="approval_status",
     ),
     search: str | None = None,
     category_id: UUID | None = None,
@@ -88,8 +85,13 @@ def list_products(
             count="exact",
         )
 
+        # Existing operational status filter
         if status_filter:
             query = query.eq("status", status_filter)
+
+        # New approval status filter
+        if approval_status:
+            query = query.eq("approval_status", approval_status)
 
         if category_id:
             query = query.eq("category_id", str(category_id))
@@ -101,16 +103,22 @@ def list_products(
             query = query.eq("is_featured", featured)
 
         if search and search.strip():
-            query = query.ilike("name", f"%{search.strip()}%")
+            query = query.ilike(
+                "name",
+                f"%{search.strip()}%",
+            )
 
         result = (
             query.order("created_at", desc=True)
             .range(offset, offset + limit - 1)
             .execute()
         )
+
         items = []
+
         for product in result.data or []:
             item = dict(product)
+
             images = item.get("product_images") or []
             variants = item.get("product_variants") or []
             category = item.get("categories")
@@ -122,17 +130,24 @@ def list_products(
                 (
                     image
                     for image in images
-                    if image.get("is_primary") and image.get("image_url")
+                    if image.get("is_primary")
+                    and image.get("image_url")
                 ),
                 None,
             )
+
             if primary_image is None:
                 available_images = [
-                    image for image in images if image.get("image_url")
+                    image
+                    for image in images
+                    if image.get("image_url")
                 ]
+
                 primary_image = min(
                     available_images,
-                    key=lambda image: int(image.get("sort_order") or 0),
+                    key=lambda image: int(
+                        image.get("sort_order") or 0
+                    ),
                     default=None,
                 )
 
@@ -150,13 +165,31 @@ def list_products(
                 if primary_image
                 else None
             )
+
             item["category_name"] = (
-                category.get("name") if isinstance(category, dict) else None
+                category.get("name")
+                if isinstance(category, dict)
+                else None
             )
-            item["price"] = variant.get("price") if variant else None
+
+            item["price"] = (
+                variant.get("price")
+                if variant
+                else None
+            )
+
             item["stock_quantity"] = (
-                variant.get("stock_quantity") if variant else None
+                variant.get("stock_quantity")
+                if variant
+                else None
             )
+
+            # Always expose approval status
+            item["approval_status"] = (
+                item.get("approval_status")
+                or "pending"
+            )
+
             items.append(item)
 
         return {
@@ -165,34 +198,60 @@ def list_products(
             "limit": limit,
             "offset": offset,
         }
+
     except Exception as exc:
         raise HTTPException(
-            500, "Unable to retrieve products"
+            500,
+            "Unable to retrieve products",
         ) from exc
 
+
+# ---------------------------------------------------------
+# GET PRODUCT
+# ---------------------------------------------------------
 
 @router.get("/{product_id}")
 def get_product(product_id: UUID):
     try:
         result = (
             supabase.table("products")
-            .select("*, product_images(*), product_variants(*)")
+            .select(
+                "*, product_images(*), product_variants(*)"
+            )
             .eq("id", str(product_id))
             .maybe_single()
             .execute()
         )
 
         if not result.data:
-            raise HTTPException(404, "Product not found")
+            raise HTTPException(
+                404,
+                "Product not found",
+            )
 
-        return result.data
+        product = dict(result.data)
+
+        product["approval_status"] = (
+            product.get("approval_status")
+            or "pending"
+        )
+
+        return product
+
     except HTTPException:
         raise
+
     except Exception as exc:
         raise HTTPException(
-            500, "Unable to retrieve product"
+            500,
+            "Unable to retrieve product",
         ) from exc
 
+
+# ---------------------------------------------------------
+# CREATE PRODUCT
+# KEEP EXISTING ADMIN CREATION FLOW
+# ---------------------------------------------------------
 
 @router.post("", status_code=201)
 def create_product(payload: AdminProductCreate):
@@ -217,19 +276,26 @@ def create_product(payload: AdminProductCreate):
 
         if not result.data:
             raise HTTPException(
-                500, "Product creation returned no result"
+                500,
+                "Product creation returned no result",
             )
 
         return {
             "message": "Product created successfully",
             **result.data,
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
         raise _database_error(exc) from exc
 
 
+# ---------------------------------------------------------
+# UPDATE PRODUCT
+# EXISTING ADMIN UPDATE FLOW
+# ---------------------------------------------------------
 
 @router.patch("/{product_id}")
 def update_product(
@@ -244,14 +310,18 @@ def update_product(
         )
 
         for field in (
-            "category_id", "name", "slug", "status", "is_featured"
+            "category_id",
+            "name",
+            "slug",
+            "status",
+            "is_featured",
         ):
             if field in changes and changes[field] is None:
                 raise HTTPException(
-                    422, f"{field} cannot be null"
+                    422,
+                    f"{field} cannot be null",
                 )
 
-        # Prepare variants and images BEFORE using them
         variants_payload = (
             [
                 item.model_dump(mode="json")
@@ -270,15 +340,6 @@ def update_product(
             else None
         )
 
-        print("========== PRODUCT UPDATE DEBUG ==========")
-        print("Product ID:", product_id)
-        print("Variants received:", variants_payload)
-        print(
-            "Variants field supplied:",
-            "variants" in payload.model_fields_set
-        )
-        print("==========================================")
-
         result = supabase.rpc(
             "admin_update_product",
             {
@@ -289,11 +350,10 @@ def update_product(
             },
         ).execute()
 
-        print("RPC RESPONSE:", result.data)
-
         if not result.data:
             raise HTTPException(
-                500, "Product update returned no result"
+                500,
+                "Product update returned no result",
             )
 
         return {
@@ -303,10 +363,14 @@ def update_product(
 
     except HTTPException:
         raise
+
     except Exception as exc:
         raise _database_error(exc) from exc
 
 
+# ---------------------------------------------------------
+# EXISTING PRODUCT STATUS UPDATE
+# ---------------------------------------------------------
 
 @router.patch("/{product_id}/status")
 def update_product_status(
@@ -316,52 +380,147 @@ def update_product_status(
     try:
         result = (
             supabase.table("products")
-            .update({
-                "status": new_status,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
+            .update(
+                {
+                    "status": new_status,
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                }
+            )
             .eq("id", str(product_id))
             .execute()
         )
 
         if not result.data:
-            raise HTTPException(404, "Product not found")
+            raise HTTPException(
+                404,
+                "Product not found",
+            )
 
         return {
             "message": "Product status updated",
             "product": result.data[0],
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
         raise HTTPException(
-            500, "Unable to update product status"
+            500,
+            "Unable to update product status",
         ) from exc
 
+
+# ---------------------------------------------------------
+# APPROVE / REJECT PRODUCT
+# ---------------------------------------------------------
+
+@router.patch("/{product_id}/approval")
+def update_product_approval(
+    product_id: UUID,
+    approval_status: ApprovalStatus,
+):
+    try:
+        product_result = (
+            supabase.table("products")
+            .select("id, approval_status, status")
+            .eq("id", str(product_id))
+            .maybe_single()
+            .execute()
+        )
+
+        if not product_result.data:
+            raise HTTPException(
+                404,
+                "Product not found",
+            )
+
+        update_data = {
+            "approval_status": approval_status,
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+        # Approved products become active
+        if approval_status == "approved":
+            update_data["status"] = "active"
+
+        # Rejected products must not remain active
+        elif approval_status == "rejected":
+            update_data["status"] = "rejected"
+
+        result = (
+            supabase.table("products")
+            .update(update_data)
+            .eq("id", str(product_id))
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(
+                404,
+                "Product not found",
+            )
+
+        return {
+            "message": (
+                "Product approved successfully"
+                if approval_status == "approved"
+                else "Product rejected successfully"
+            ),
+            "product": result.data[0],
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        raise HTTPException(
+            500,
+            "Unable to update product approval",
+        ) from exc
+
+
+# ---------------------------------------------------------
+# ARCHIVE PRODUCT
+# ---------------------------------------------------------
 
 @router.delete("/{product_id}")
 def archive_product(product_id: UUID):
     try:
         result = (
             supabase.table("products")
-            .update({
-                "status": "archived",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
+            .update(
+                {
+                    "status": "archived",
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                }
+            )
             .eq("id", str(product_id))
             .execute()
         )
 
         if not result.data:
-            raise HTTPException(404, "Product not found")
+            raise HTTPException(
+                404,
+                "Product not found",
+            )
 
         return {
             "message": "Product archived successfully",
             "product": result.data[0],
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
         raise HTTPException(
-            500, "Unable to archive product"
+            500,
+            "Unable to archive product",
         ) from exc
