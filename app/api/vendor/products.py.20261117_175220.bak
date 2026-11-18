@@ -1,0 +1,1216 @@
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    UploadFile,
+)
+
+from app.dependencies.vendor_permissions import (
+    require_vendor_permission,
+)
+
+from app.schemas.vendor.products import (
+    VendorProductCreateRequest,
+    VendorProductUpdateRequest,
+    VendorVariantCreateRequest,
+    VendorVariantUpdateRequest,
+)
+
+from app.services.vendor.product_service import (
+    archive_vendor_product,
+    create_product_variant,
+    create_vendor_product,
+    delete_product_variant,
+    get_vendor_product,
+    list_product_variants,
+    list_vendor_products,
+    submit_vendor_product_for_approval,
+    update_product_variant,
+    update_vendor_product,
+)
+
+from app.services.vendor.product_image_service import (
+    delete_product_image,
+    list_product_images,
+    set_primary_product_image,
+    upload_product_image,
+)
+
+
+router = APIRouter(
+    prefix="/products",
+    tags=["Vendor Products"],
+)
+
+
+# ============================================================
+# PRODUCTS — LIST
+# Permission: products.view
+# ============================================================
+
+@router.get("")
+def vendor_products(
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    return list_vendor_products(
+        vendor_context["vendor_id"]
+    )
+
+
+# ============================================================
+# PRODUCTS — CREATE
+# Permission: products.create
+# ============================================================
+
+@router.post("")
+def vendor_create_product(
+    payload: VendorProductCreateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.create")
+    ),
+):
+    """
+    New products begin in draft status.
+
+    Product approval is not granted by this route.
+    """
+
+    return create_vendor_product(
+        vendor_id=vendor_context["vendor_id"],
+        payload=payload.model_dump(mode="json"),
+    )
+
+
+# ============================================================
+# PRODUCTS — SUBMIT FOR APPROVAL
+# Permission: products.update
+# ============================================================
+
+@router.post("/{product_id}/submit-for-approval")
+def vendor_submit_product_for_approval(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    """
+    Existing approval workflow remains unchanged.
+
+    Only the backend service may validate the
+    product and transition it to pending review.
+    """
+
+    return submit_vendor_product_for_approval(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+    )
+
+
+# ============================================================
+# PRODUCTS — DETAIL
+# Permission: products.view
+# ============================================================
+
+@router.get("/{product_id}")
+def vendor_product_detail(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    return get_vendor_product(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+    )
+
+
+# ============================================================
+# PRODUCTS — UPDATE
+# Permission: products.update
+# ============================================================
+
+@router.patch("/{product_id}")
+def vendor_edit_product(
+    product_id: str,
+    payload: VendorProductUpdateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    """
+    Editable product statuses remain controlled
+    by the existing product service.
+
+    Only explicitly provided fields are updated.
+    """
+
+    return update_vendor_product(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+        payload=payload.model_dump(
+            mode="json",
+            exclude_unset=True,
+        ),
+    )
+
+
+# ============================================================
+# PRODUCTS — ARCHIVE
+# Permission: products.update
+# ============================================================
+
+@router.delete("/{product_id}")
+def vendor_delete_product(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    return archive_vendor_product(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+    )
+
+
+# ============================================================
+# PRODUCT IMAGES — LIST
+# Permission: products.view
+# ============================================================
+
+@router.get("/{product_id}/images")
+def vendor_product_images(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    return list_product_images(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+    )
+
+
+# ============================================================
+# PRODUCT IMAGES — UPLOAD
+# Permission: products.images
+# ============================================================
+
+@router.post("/{product_id}/images")
+async def vendor_upload_product_image(
+    product_id: str,
+    file: UploadFile = File(...),
+    alt_text: str | None = Form(default=None),
+    sort_order: int = Form(default=0),
+    is_primary: bool = Form(default=False),
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+    """
+    Retains the existing multipart upload
+    and image service validation.
+    """
+
+    return await upload_product_image(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+        file=file,
+        alt_text=alt_text,
+        sort_order=sort_order,
+        is_primary=is_primary,
+    )
+
+
+# ============================================================
+# PRODUCT IMAGES — SET PRIMARY
+# Permission: products.images
+# ============================================================
+
+@router.patch(
+    "/{product_id}/images/{image_id}/primary"
+)
+def vendor_set_primary_product_image(
+    product_id: str,
+    image_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+    return set_primary_product_image(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+        image_id=image_id,
+    )
+
+
+# ============================================================
+# PRODUCT IMAGES — DELETE
+# Permission: products.images
+# ============================================================
+
+@router.delete(
+    "/{product_id}/images/{image_id}"
+)
+def vendor_delete_product_image(
+    product_id: str,
+    image_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+    return delete_product_image(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+        image_id=image_id,
+    )
+
+
+# ============================================================
+# PRODUCT VARIANTS — LIST
+# Permission: products.view
+# ============================================================
+
+@router.get("/{product_id}/variants")
+def vendor_product_variants(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    return list_product_variants(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+    )
+
+
+# ============================================================
+# PRODUCT VARIANTS — CREATE
+# Permission: products.create
+# ============================================================
+
+@router.post("/{product_id}/variants")
+def vendor_create_variant(
+    product_id: str,
+    payload: VendorVariantCreateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.create")
+    ),
+):
+    """
+    Uses model_dump(mode="json") so Decimal
+    fields are JSON serializable.
+    """
+
+    return create_product_variant(
+        vendor_id=vendor_context["vendor_id"],
+        product_id=product_id,
+        payload=payload.model_dump(mode="json"),
+    )
+
+
+# ============================================================
+# PRODUCT VARIANTS — UPDATE
+#
+# TEMPORARY STRICT RULE:
+# Requires BOTH products.update AND inventory.update.
+#
+# This route can update product content and also
+# stock-related fields for active variants.
+#
+# Until the mixed operations are separated and
+# the request schema is audited, requiring both
+# prevents product-only staff from bypassing
+# inventory permissions.
+# ============================================================
+
+@router.patch("/variants/{variant_id}")
+def vendor_edit_variant(
+    variant_id: str,
+    payload: VendorVariantUpdateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+    _inventory_context=Depends(
+        require_vendor_permission("inventory.update")
+    ),
+):
+    return update_product_variant(
+        vendor_id=vendor_context["vendor_id"],
+        variant_id=variant_id,
+        payload=payload.model_dump(
+            mode="json",
+            exclude_unset=True,
+        ),
+    )
+
+
+# ============================================================
+# PRODUCT VARIANTS — DEACTIVATE
+# Permission: products.update
+# ============================================================
+
+@router.delete("/variants/{variant_id}")
+def vendor_delete_variant(
+    variant_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    return delete_product_variant(
+        vendor_id=vendor_context["vendor_id"],
+        variant_id=variant_id,
+    )
+
+
+# ============================================================
+# APPROVED PRODUCT REVISIONS
+# ============================================================
+
+from datetime import datetime, timezone
+from fastapi import HTTPException
+from postgrest.exceptions import APIError
+from app.core.supabase import supabase_admin
+
+
+def _revision_rpc(function_name, params):
+    try:
+        response = supabase_admin.rpc(
+            function_name,
+            params,
+        ).execute()
+
+        data = response.data
+
+        if isinstance(data, list):
+            data = data[0] if data else None
+
+        if not data:
+            raise HTTPException(
+                status_code=500,
+                detail="Revision operation returned no data.",
+            )
+
+        return data
+
+    except APIError as exc:
+        if exc.code == "P0001":
+            raise HTTPException(
+                status_code=400,
+                detail=exc.message,
+            ) from exc
+
+        if exc.code == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail="A conflicting revision already exists.",
+            ) from exc
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process product revision.",
+        ) from exc
+
+
+def _get_vendor_revision(
+    product_id,
+    vendor_id,
+    editable=False,
+):
+    query = (
+        supabase_admin
+        .table("product_revisions")
+        .select("*")
+        .eq("product_id", product_id)
+        .eq("vendor_id", vendor_id)
+    )
+
+    if editable:
+        query = query.eq("status", "draft")
+    else:
+        query = query.in_(
+            "status",
+            ["draft", "pending"],
+        )
+
+    response = (
+        query.order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    rows = response.data or []
+
+    if not rows and not editable:
+        response = (
+            supabase_admin
+            .table("product_revisions")
+            .select("*")
+            .eq("product_id", product_id)
+            .eq("vendor_id", vendor_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Product revision not found.",
+        )
+
+    return rows[0]
+
+
+def _save_vendor_revision(revision, updates):
+
+    response = (
+        supabase_admin
+        .table("product_revisions")
+        .update({
+            **updates,
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        })
+        .eq("id", revision["id"])
+        .eq("vendor_id", revision["vendor_id"])
+        .eq("status", "draft")
+        .eq("updated_at", revision["updated_at"])
+        .execute()
+    )
+
+    rows = response.data or []
+
+    if not rows:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Revision has changed or was submitted. "
+                "Refresh and try again."
+            ),
+        )
+
+    return rows[0]
+
+
+@router.post("/{product_id}/revision")
+def vendor_create_revision(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    return _revision_rpc(
+        "create_product_revision",
+        {
+            "p_product_id": product_id,
+            "p_vendor_id": vendor_context["vendor_id"],
+        },
+    )
+
+
+@router.get("/{product_id}/revision")
+def vendor_get_revision(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    return _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+    )
+
+
+@router.patch("/{product_id}/revision")
+def vendor_update_revision(
+    product_id: str,
+    payload: VendorProductUpdateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    vendor_id = vendor_context["vendor_id"]
+
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_id,
+        editable=True,
+    )
+
+    changes = payload.model_dump(
+        mode="json",
+        exclude_unset=True,
+    )
+
+    allowed_fields = {
+        "category_id",
+        "name",
+        "short_description",
+        "description",
+        "ingredients",
+        "benefits",
+        "directions",
+        "warnings",
+    }
+
+    data = dict(revision["product_data"])
+
+    data.update({
+        key: value
+        for key, value in changes.items()
+        if key in allowed_fields
+    })
+
+    if len(str(data.get("name") or "").strip()) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Product name is required.",
+        )
+
+    if not data.get("category_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Product category is required.",
+        )
+
+    return _save_vendor_revision(
+        revision,
+        {"product_data": data},
+    )
+
+
+@router.post("/{product_id}/revision/submit")
+def vendor_submit_revision(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    vendor_id = vendor_context["vendor_id"]
+
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_id,
+        editable=True,
+    )
+
+    return _revision_rpc(
+        "submit_product_revision",
+        {
+            "p_revision_id": revision["id"],
+            "p_vendor_id": vendor_id,
+        },
+    )
+
+
+
+# ============================================================
+# PRODUCT REVISION IMAGES AND VARIANTS
+# ============================================================
+
+from uuid import uuid4
+
+from app.services.vendor.product_image_service import (
+    PRODUCT_IMAGE_BUCKET,
+    MAX_IMAGE_SIZE_BYTES,
+    ALLOWED_IMAGE_TYPES,
+    _get_extension,
+    _public_url_for_path,
+)
+
+from app.services.vendor.product_service import (
+    _build_variant_attributes,
+    _validate_variant_values,
+    _ensure_unique_sku,
+    _normalize_variant,
+)
+
+
+# ============================================================
+# REVISION IMAGES
+# ============================================================
+
+
+@router.get("/{product_id}/revision/images")
+def vendor_get_revision_images(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+    )
+
+    return revision.get("images_data", [])
+
+
+@router.post("/{product_id}/revision/images")
+async def vendor_upload_revision_image(
+    product_id: str,
+    file: UploadFile = File(...),
+    alt_text: str | None = Form(default=None),
+    sort_order: int = Form(default=0),
+    is_primary: bool = Form(default=False),
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+
+    vendor_id = vendor_context["vendor_id"]
+
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_id,
+        editable=True,
+    )
+
+    content_type = (
+        file.content_type or ""
+    ).lower()
+
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Use JPG, PNG or WEBP images.",
+        )
+
+    file_bytes = await file.read(
+        MAX_IMAGE_SIZE_BYTES + 1
+    )
+
+    if not file_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Image file is empty.",
+        )
+
+    if len(file_bytes) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Image must be 8 MB or smaller.",
+        )
+
+    extension = _get_extension(
+        file.filename,
+        content_type,
+    )
+
+    image_id = str(uuid4())
+
+    storage_path = (
+        f"{vendor_id}/{product_id}/revisions/"
+        f"{revision['id']}/{image_id}{extension}"
+    )
+
+    try:
+        supabase_admin.storage.from_(
+            PRODUCT_IMAGE_BUCKET
+        ).upload(
+            path=storage_path,
+            file=file_bytes,
+            file_options={
+                "content-type": content_type,
+                "upsert": "false",
+            },
+        )
+
+        image_url = _public_url_for_path(
+            storage_path
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to upload revision image.",
+        ) from exc
+
+    images = list(
+        revision.get("images_data") or []
+    )
+
+    primary = is_primary or not images
+
+    if primary:
+        for image in images:
+            image["is_primary"] = False
+
+    new_image = {
+        "id": image_id,
+        "product_id": product_id,
+        "variant_id": None,
+        "image_url": image_url,
+        "alt_text": alt_text,
+        "sort_order": max(0, sort_order),
+        "is_primary": primary,
+    }
+
+    images.append(new_image)
+
+    _save_vendor_revision(
+        revision,
+        {"images_data": images},
+    )
+
+    return new_image
+
+
+@router.patch(
+    "/{product_id}/revision/images/{image_id}/primary"
+)
+def vendor_set_revision_primary_image(
+    product_id: str,
+    image_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+        editable=True,
+    )
+
+    images = list(
+        revision.get("images_data") or []
+    )
+
+    if not any(
+        image["id"] == image_id
+        for image in images
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Revision image not found.",
+        )
+
+    for image in images:
+        image["is_primary"] = (
+            image["id"] == image_id
+        )
+
+    return _save_vendor_revision(
+        revision,
+        {"images_data": images},
+    )
+
+
+@router.delete(
+    "/{product_id}/revision/images/{image_id}"
+)
+def vendor_delete_revision_image(
+    product_id: str,
+    image_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.images")
+    ),
+):
+
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+        editable=True,
+    )
+
+    existing_images = revision.get(
+        "images_data"
+    ) or []
+
+    images = [
+        image
+        for image in existing_images
+        if image["id"] != image_id
+    ]
+
+    if len(images) == len(existing_images):
+        raise HTTPException(
+            status_code=404,
+            detail="Revision image not found.",
+        )
+
+    if images and not any(
+        image.get("is_primary")
+        for image in images
+    ):
+        images[0]["is_primary"] = True
+
+    # Remove only the draft image reference.
+    # Published Storage files remain untouched.
+
+    return _save_vendor_revision(
+        revision,
+        {"images_data": images},
+    )
+
+
+# ============================================================
+# REVISION VARIANTS
+# ============================================================
+
+
+def _revision_unique_sku(
+    variants,
+    sku,
+    variant_id=None,
+):
+    sku = str(sku or "").strip()
+
+    if not sku:
+        raise HTTPException(
+            status_code=400,
+            detail="SKU is required.",
+        )
+
+    for item in variants:
+        if (
+            item.get("sku") == sku
+            and item.get("id") != variant_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Duplicate SKU in revision.",
+            )
+
+    _ensure_unique_sku(
+        sku,
+        exclude_variant_id=variant_id,
+    )
+
+    return sku
+
+
+def _revision_variant_is_published(
+    product_id,
+    variant_id,
+):
+    response = (
+        supabase_admin
+        .table("product_variants")
+        .select("id")
+        .eq("id", variant_id)
+        .eq("product_id", product_id)
+        .limit(1)
+        .execute()
+    )
+
+    return bool(response.data)
+
+
+@router.get("/{product_id}/revision/variants")
+def vendor_get_revision_variants(
+    product_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.view")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+    )
+
+    product_variants_response = (
+        supabase_admin
+        .table("product_variants")
+        .select("id,stock_quantity,attributes")
+        .eq("product_id", product_id)
+        .execute()
+    )
+
+    live_variants = {
+        item["id"]: item
+        for item in (
+            product_variants_response.data or []
+        )
+    }
+
+    result = []
+
+    for item in revision.get("variants_data") or []:
+
+        variant = dict(item)
+
+        live = live_variants.get(
+            variant["id"]
+        )
+
+        variant["is_published_variant"] = (
+            live is not None
+        )
+
+        if live is not None:
+
+            variant["stock_quantity"] = live.get(
+                "stock_quantity", 0
+            )
+
+            attributes = dict(
+                variant.get("attributes") or {}
+            )
+
+            attributes["low_stock_threshold"] = (
+                live.get("attributes") or {}
+            ).get("low_stock_threshold", 5)
+
+            variant["attributes"] = attributes
+
+        result.append(
+            _normalize_variant(variant)
+        )
+
+    return result
+
+
+@router.post("/{product_id}/revision/variants")
+def vendor_create_revision_variant(
+    product_id: str,
+    payload: VendorVariantCreateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.create")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+        editable=True,
+    )
+
+    variants = list(
+        revision.get("variants_data") or []
+    )
+
+    data = payload.model_dump(mode="json")
+
+    variant = {
+        "id": str(uuid4()),
+        "product_id": product_id,
+        "name": data.get("name"),
+        "sku": _revision_unique_sku(
+            variants,
+            data.get("sku"),
+        ),
+        "price": data["price"],
+        "compare_at_price": data.get(
+            "compare_at_price"
+        ),
+        "cost_price": data.get("cost_price"),
+        "stock_quantity": data.get(
+            "stock_quantity", 0
+        ),
+        "is_active": data.get(
+            "is_active", True
+        ),
+        "attributes": _build_variant_attributes(
+            data,
+            {
+                "low_stock_threshold": 5,
+                "is_default": False,
+            },
+        ),
+    }
+
+    _validate_variant_values(variant)
+
+    if variant["attributes"].get("is_default"):
+        for item in variants:
+            item.setdefault(
+                "attributes", {}
+            )["is_default"] = False
+
+    variants.append(variant)
+
+    _save_vendor_revision(
+        revision,
+        {"variants_data": variants},
+    )
+
+    return _normalize_variant(variant)
+
+
+@router.patch(
+    "/{product_id}/revision/variants/{variant_id}"
+)
+def vendor_update_revision_variant(
+    product_id: str,
+    variant_id: str,
+    payload: VendorVariantUpdateRequest,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+        editable=True,
+    )
+
+    variants = list(
+        revision.get("variants_data") or []
+    )
+
+    changes = payload.model_dump(
+        mode="json",
+        exclude_unset=True,
+    )
+
+    # Live inventory must use the inventory API.
+    if (
+        "stock_quantity" in changes
+        or "low_stock_threshold" in changes
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Use Inventory Management for "
+                "stock and stock threshold adjustments."
+            ),
+        )
+
+    for item in variants:
+
+        if item["id"] != variant_id:
+            continue
+
+        if "sku" in changes:
+            changes["sku"] = _revision_unique_sku(
+                variants,
+                changes["sku"],
+                variant_id,
+            )
+
+        for key in (
+            "name",
+            "sku",
+            "price",
+            "compare_at_price",
+            "cost_price",
+            "is_active",
+        ):
+            if key in changes:
+                item[key] = changes[key]
+
+        item["attributes"] = (
+            _build_variant_attributes(
+                changes,
+                item.get("attributes") or {},
+            )
+        )
+
+        if (
+            item.get("price") is None
+            or float(item["price"]) <= 0
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Variant price must be positive.",
+            )
+
+        if item.get("is_active") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Variant active status is required.",
+            )
+
+        _validate_variant_values(item)
+
+        if changes.get("is_default") is True:
+            for other in variants:
+                if other["id"] != variant_id:
+                    other.setdefault(
+                        "attributes", {}
+                    )["is_default"] = False
+
+        _save_vendor_revision(
+            revision,
+            {"variants_data": variants},
+        )
+
+        return _normalize_variant(item)
+
+    raise HTTPException(
+        status_code=404,
+        detail="Revision variant not found.",
+    )
+
+
+@router.delete(
+    "/{product_id}/revision/variants/{variant_id}"
+)
+def vendor_remove_revision_variant(
+    product_id: str,
+    variant_id: str,
+    vendor_context=Depends(
+        require_vendor_permission("products.update")
+    ),
+):
+    revision = _get_vendor_revision(
+        product_id,
+        vendor_context["vendor_id"],
+        editable=True,
+    )
+
+    variants = list(
+        revision.get("variants_data") or []
+    )
+
+    if not any(
+        item["id"] == variant_id
+        for item in variants
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Revision variant not found.",
+        )
+
+    published = _revision_variant_is_published(
+        product_id,
+        variant_id,
+    )
+
+    if published:
+
+        for item in variants:
+            if item["id"] == variant_id:
+                item["is_active"] = False
+                item.setdefault(
+                    "attributes", {}
+                )["is_default"] = False
+
+    else:
+
+        variants = [
+            item
+            for item in variants
+            if item["id"] != variant_id
+        ]
+
+    images = list(
+        revision.get("images_data") or []
+    )
+
+    for image in images:
+        if image.get("variant_id") == variant_id:
+            image["variant_id"] = None
+
+    _save_vendor_revision(
+        revision,
+        {
+            "variants_data": variants,
+            "images_data": images,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": (
+            "Variant removal saved in revision."
+        ),
+        "requires_admin_approval": True,
+    }
+

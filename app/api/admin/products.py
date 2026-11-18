@@ -114,14 +114,49 @@ def list_products(
             .execute()
         )
 
+        products = result.data or []
+
+        # Load vendor information in one batch so the Admin Products
+        # page can display the vendor without making one API request
+        # per product.
+        vendor_ids = list(
+            {
+                str(product.get("vendor_id"))
+                for product in products
+                if product.get("vendor_id")
+            }
+        )
+
+        vendors_by_id = {}
+
+        if vendor_ids:
+            vendors_result = (
+                supabase.table("vendors")
+                .select(
+                    "id, business_name, legal_name, slug, logo_url"
+                )
+                .in_("id", vendor_ids)
+                .execute()
+            )
+
+            vendors_by_id = {
+                str(vendor.get("id")): vendor
+                for vendor in (vendors_result.data or [])
+                if vendor.get("id")
+            }
+
         items = []
 
-        for product in result.data or []:
+        for product in products:
             item = dict(product)
 
             images = item.get("product_images") or []
             variants = item.get("product_variants") or []
             category = item.get("categories")
+
+            vendor = vendors_by_id.get(
+                str(item.get("vendor_id"))
+            )
 
             if isinstance(category, list):
                 category = category[0] if category else None
@@ -184,6 +219,20 @@ def list_products(
                 else None
             )
 
+            # Vendor information is exposed for the Admin Products
+            # page and for notification-driven product navigation.
+            item["vendor_name"] = (
+                vendor.get("business_name")
+                if isinstance(vendor, dict)
+                else None
+            )
+            item["vendor_business_name"] = (
+                vendor.get("business_name")
+                if isinstance(vendor, dict)
+                else None
+            )
+            item["vendor"] = vendor
+
             # Always expose approval status
             item["approval_status"] = (
                 item.get("approval_status")
@@ -230,6 +279,37 @@ def get_product(product_id: UUID):
             )
 
         product = dict(result.data)
+
+        # Include the vendor details so the full Admin Product Details
+        # view can show which vendor submitted the product.
+        vendor_id = product.get("vendor_id")
+
+        if vendor_id:
+            vendor_result = (
+                supabase.table("vendors")
+                .select(
+                    "id, business_name, legal_name, slug, logo_url"
+                )
+                .eq("id", str(vendor_id))
+                .maybe_single()
+                .execute()
+            )
+
+            product["vendor"] = vendor_result.data
+            product["vendor_name"] = (
+                vendor_result.data.get("business_name")
+                if vendor_result.data
+                else None
+            )
+            product["vendor_business_name"] = (
+                vendor_result.data.get("business_name")
+                if vendor_result.data
+                else None
+            )
+        else:
+            product["vendor"] = None
+            product["vendor_name"] = None
+            product["vendor_business_name"] = None
 
         product["approval_status"] = (
             product.get("approval_status")

@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from app.api.vendor.router import vendor_router
+
 from app.api.admin import (
     banners as admin_banners,
     categories as admin_categories,
@@ -66,6 +68,7 @@ api_router.include_router(notifications.router)
 api_router.include_router(admin_product_images.router)
 api_router.include_router(support.router)
 api_router.include_router(site_settings.router)
+api_router.include_router(vendor_router)
 
 # ============================================================
 # Admin API routes

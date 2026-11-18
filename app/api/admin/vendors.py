@@ -1375,7 +1375,7 @@ def get_vendor(
         pending_products = sum(
             1
             for product in products
-            if product.get("status") == "pending"
+            if str(product.get("approval_status", "")).lower() == "pending"
         )
 
         delivered_order_items = [
@@ -1555,6 +1555,7 @@ def get_vendor(
                     "title": "Product updated",
                     "description": product.get("name") or "Vendor product",
                     "status": product.get("status") or "—",
+                    "approval_status": product.get("approval_status") or "—",
                     "created_at": updated_at,
                     "source": "products",
                     "product_id": product.get("id"),
@@ -1566,6 +1567,7 @@ def get_vendor(
                     "title": "Product submitted",
                     "description": product.get("name") or "Vendor product",
                     "status": product.get("status") or "—",
+                    "approval_status": product.get("approval_status") or "—",
                     "created_at": created_at,
                     "source": "products",
                     "product_id": product.get("id"),
@@ -1854,7 +1856,7 @@ def get_vendor_details(vendor_id: UUID):
         products = products_result.data or []
 
         # ---------------------------------------------------------
-        # 3. PRODUCT IMAGES
+        # 3. PRODUCT IMAGES / VARIANTS
         # ---------------------------------------------------------
         product_ids = [
             str(product["id"])
@@ -2192,15 +2194,19 @@ def get_vendor_details(vendor_id: UUID):
         approved_products = sum(
             1
             for product in products
-            if str(product.get("status", "")).lower()
-            in {"approved", "active", "published"}
+            if str(product.get("approval_status", "")).lower() == "approved"
         )
 
         pending_products = sum(
             1
             for product in products
-            if str(product.get("status", "")).lower()
-            == "pending"
+            if str(product.get("approval_status", "")).lower() == "pending"
+        )
+
+        rejected_products = sum(
+            1
+            for product in products
+            if str(product.get("approval_status", "")).lower() == "rejected"
         )
 
         # ---------------------------------------------------------
@@ -2271,6 +2277,7 @@ def get_vendor_details(vendor_id: UUID):
                     "title": "Product updated",
                     "description": product.get("name") or "Vendor product",
                     "status": product.get("status") or "—",
+                    "approval_status": product.get("approval_status") or "—",
                     "created_at": updated_at,
                     "source": "products",
                     "product_id": product.get("id"),
@@ -2282,6 +2289,7 @@ def get_vendor_details(vendor_id: UUID):
                     "title": "Product submitted",
                     "description": product.get("name") or "Vendor product",
                     "status": product.get("status") or "—",
+                    "approval_status": product.get("approval_status") or "—",
                     "created_at": created_at,
                     "source": "products",
                     "product_id": product.get("id"),
@@ -2310,6 +2318,12 @@ def get_vendor_details(vendor_id: UUID):
 
             "products": products,
 
+            "product_approval": {
+                "approved": approved_products,
+                "pending": pending_products,
+                "rejected": rejected_products,
+            },
+
             "team_members": members,
 
             "orders": orders,
@@ -2330,6 +2344,7 @@ def get_vendor_details(vendor_id: UUID):
                 "total_products": len(products),
                 "approved_products": approved_products,
                 "pending_products": pending_products,
+                "rejected_products": rejected_products,
 
                 "total_orders": total_orders,
                 "total_order_items": len(order_items),
