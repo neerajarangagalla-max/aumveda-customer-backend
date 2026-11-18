@@ -1,8 +1,26 @@
 from functools import lru_cache
 
+import httpx
 from supabase import Client, create_client
+from supabase.client import ClientOptions
 
 from app.core.config import settings
+
+
+def _create_supabase_client(api_key: str) -> Client:
+    # Render traces showed intermittent HTTP/2 ReadErrors from PostgREST.
+    options = ClientOptions(
+        httpx_client=httpx.Client(
+            http2=False,
+            timeout=ClientOptions().postgrest_client_timeout,
+        )
+    )
+
+    return create_client(
+        settings.supabase_url,
+        api_key,
+        options=options,
+    )
 
 
 # ============================================================
@@ -13,9 +31,8 @@ from app.core.config import settings
 
 @lru_cache
 def get_supabase_auth_client() -> Client:
-    return create_client(
-        settings.supabase_url,
-        settings.auth_client_key,
+    return _create_supabase_client(
+        settings.auth_client_key
     )
 
 
@@ -26,9 +43,8 @@ def get_supabase_auth_client() -> Client:
 
 @lru_cache
 def get_supabase_admin_client() -> Client:
-    return create_client(
-        settings.supabase_url,
-        settings.admin_client_key,
+    return _create_supabase_client(
+        settings.admin_client_key
     )
 
 
