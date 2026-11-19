@@ -39,6 +39,8 @@ class CouponCreate(BaseModel):
 
     first_order_only: bool = False
     is_active: bool = True
+    product_ids: list[UUID] = Field(default_factory=list)
+    category_ids: list[UUID] = Field(default_factory=list)
     display_locations: list[
         Literal["home", "cart", "checkout", "product_details"]
     ] = Field(default_factory=list)
@@ -55,6 +57,11 @@ class CouponCreate(BaseModel):
             )
 
         return value
+
+    @field_validator("product_ids", "category_ids")
+    @classmethod
+    def unique_target_ids(cls, value: list[UUID]) -> list[UUID]:
+        return list(dict.fromkeys(value))
 
     @model_validator(mode="after")
     def validate_coupon(self):
@@ -87,6 +94,8 @@ class CouponUpdate(BaseModel):
 
     first_order_only: bool | None = None
     is_active: bool | None = None
+    product_ids: list[UUID] | None = None
+    category_ids: list[UUID] | None = None
     display_locations: list[
         Literal["home", "cart", "checkout", "product_details"]
     ] | None = None
@@ -107,6 +116,14 @@ class CouponUpdate(BaseModel):
 
         return value
 
+    @field_validator("product_ids", "category_ids")
+    @classmethod
+    def unique_target_ids(
+        cls,
+        value: list[UUID] | None,
+    ) -> list[UUID] | None:
+        return list(dict.fromkeys(value)) if value is not None else None
+
 
 def database_error(exc: Exception) -> HTTPException:
     message = str(exc).lower()
@@ -117,9 +134,81 @@ def database_error(exc: Exception) -> HTTPException:
             detail="A coupon with this code already exists.",
         )
 
+    if "foreign key" in message or "invalid input syntax for type uuid" in message:
+        return HTTPException(
+            status_code=422,
+            detail="One or more selected products or categories no longer exist.",
+        )
+
     return HTTPException(
         status_code=500,
         detail="Coupon operation failed.",
+    )
+
+
+def load_coupon_targets(coupons: list[dict]) -> list[dict]:
+    if not coupons:
+        return []
+
+    coupon_ids = [str(coupon["id"]) for coupon in coupons]
+    product_rows = (
+        supabase
+        .table("coupon_products")
+        .select("coupon_id,product_id")
+        .in_("coupon_id", coupon_ids)
+        .execute()
+        .data
+        or []
+    )
+    category_rows = (
+        supabase
+        .table("coupon_categories")
+        .select("coupon_id,category_id")
+        .in_("coupon_id", coupon_ids)
+        .execute()
+        .data
+        or []
+    )
+
+    products_by_coupon: dict[str, list[str]] = {}
+    categories_by_coupon: dict[str, list[str]] = {}
+    for row in product_rows:
+        products_by_coupon.setdefault(row["coupon_id"], []).append(
+            row["product_id"]
+        )
+    for row in category_rows:
+        categories_by_coupon.setdefault(row["coupon_id"], []).append(
+            row["category_id"]
+        )
+
+    return [
+        {
+            **coupon,
+            "product_ids": products_by_coupon.get(str(coupon["id"]), []),
+            "category_ids": categories_by_coupon.get(str(coupon["id"]), []),
+        }
+        for coupon in coupons
+    ]
+
+
+def replace_coupon_targets(
+    coupon_id: UUID | str,
+    product_ids: list[UUID] | None,
+    category_ids: list[UUID] | None,
+):
+    (
+        supabase
+        .rpc(
+            "set_coupon_targets",
+            {
+                "p_coupon_id": str(coupon_id),
+                "p_product_ids": [str(value) for value in product_ids or []],
+                "p_category_ids": [
+                    str(value) for value in category_ids or []
+                ],
+            },
+        )
+        .execute()
     )
 
 
@@ -135,7 +224,7 @@ def get_coupon(coupon_id: UUID):
     if not result.data:
         raise HTTPException(404, "Coupon not found.")
 
-    return result.data
+    return load_coupon_targets([result.data])[0]
 
 
 def validate_dates(starts_at, expires_at):
@@ -170,7 +259,7 @@ def list_coupons(
         )
 
         return {
-            "items": result.data or [],
+            "items": load_coupon_targets(result.data or []),
             "total": result.count or 0,
             "limit": limit,
             "offset": offset,
@@ -199,7 +288,10 @@ def get_coupon_details(coupon_id: UUID):
 @router.post("", status_code=201)
 def create_coupon(payload: CouponCreate):
     try:
-        data = payload.model_dump(mode="json")
+        data = payload.model_dump(
+            mode="json",
+            exclude={"product_ids", "category_ids"},
+        )
 
         result = (
             supabase.table("coupons")
@@ -213,9 +305,26 @@ def create_coupon(payload: CouponCreate):
                 "Coupon was not created.",
             )
 
+        coupon = result.data[0]
+        try:
+            replace_coupon_targets(
+                coupon["id"],
+                payload.product_ids,
+                payload.category_ids,
+            )
+        except Exception:
+            (
+                supabase
+                .table("coupons")
+                .delete()
+                .eq("id", coupon["id"])
+                .execute()
+            )
+            raise
+
         return {
             "message": "Coupon created successfully.",
-            "coupon": result.data[0],
+            "coupon": get_coupon(UUID(coupon["id"])),
         }
 
     except HTTPException:
@@ -236,8 +345,20 @@ def update_coupon(
             mode="json",
             exclude_unset=True,
         )
+        product_ids = changes.pop(
+            "product_ids",
+            existing.get("product_ids", []),
+        )
+        category_ids = changes.pop(
+            "category_ids",
+            existing.get("category_ids", []),
+        )
+        targets_changed = (
+            "product_ids" in payload.model_fields_set
+            or "category_ids" in payload.model_fields_set
+        )
 
-        if not changes:
+        if not changes and not targets_changed:
             raise HTTPException(
                 422,
                 "No coupon changes were provided.",
@@ -259,27 +380,35 @@ def update_coupon(
             merged["expires_at"],
         )
 
-        changes["updated_at"] = datetime.now(
-            timezone.utc
-        ).isoformat()
+        if changes:
+            changes["updated_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
 
-        result = (
-            supabase.table("coupons")
-            .update(changes)
-            .eq("id", str(coupon_id))
-            .select("*")
-            .execute()
-        )
+            result = (
+                supabase.table("coupons")
+                .update(changes)
+                .eq("id", str(coupon_id))
+                .select("*")
+                .execute()
+            )
 
-        if not result.data:
-            raise HTTPException(
-                404,
-                "Coupon not found or not updated.",
+            if not result.data:
+                raise HTTPException(
+                    404,
+                    "Coupon not found or not updated.",
+                )
+
+        if targets_changed:
+            replace_coupon_targets(
+                coupon_id,
+                product_ids,
+                category_ids,
             )
 
         return {
             "message": "Coupon updated successfully.",
-            "coupon": result.data[0],
+            "coupon": get_coupon(coupon_id),
         }
 
     except HTTPException:

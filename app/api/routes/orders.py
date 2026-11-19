@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from fastapi.responses import Response
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -20,7 +21,7 @@ from fastapi.security import (
     HTTPBearer,
 )
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from decimal import Decimal
 
 from app.core.config import settings
@@ -63,11 +64,35 @@ class CreateOrderRequest(BaseModel):
 class ValidateCouponRequest(BaseModel):
     code: str = Field(min_length=3, max_length=40)
     placement: Literal["cart", "checkout"]
+    variant_id: UUID | None = None
+    quantity: int | None = Field(default=None, ge=1, le=100)
 
     @field_validator("code")
     @classmethod
     def normalize_code(cls, value: str) -> str:
         return value.strip().upper()
+
+    @model_validator(mode="after")
+    def validate_context(self):
+        if bool(self.variant_id) != bool(self.quantity):
+            raise ValueError("Variant and quantity must be provided together.")
+        if self.variant_id and self.placement != "checkout":
+            raise ValueError("Buy Now coupons are only available at checkout.")
+        return self
+
+
+class AvailableCouponsRequest(BaseModel):
+    placement: Literal["cart", "checkout"]
+    variant_id: UUID | None = None
+    quantity: int | None = Field(default=None, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_context(self):
+        if bool(self.variant_id) != bool(self.quantity):
+            raise ValueError("Variant and quantity must be provided together.")
+        if self.variant_id and self.placement != "checkout":
+            raise ValueError("Buy Now coupons are only available at checkout.")
+        return self
 
 
 class CreateBuyNowOrderRequest(BaseModel):
@@ -75,6 +100,21 @@ class CreateBuyNowOrderRequest(BaseModel):
     variant_id: UUID
     quantity: int = Field(ge=1, le=100)
     payment_method: Literal["cod"] = "cod"
+    coupon_code: str | None = Field(default=None, min_length=3, max_length=40)
+    coupon_placement: Literal["cart", "checkout"] | None = None
+
+    @field_validator("coupon_code")
+    @classmethod
+    def normalize_coupon_code(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
+
+    @model_validator(mode="after")
+    def validate_coupon_pair(self):
+        if bool(self.coupon_code) != bool(self.coupon_placement):
+            raise ValueError("Coupon code and placement must be provided together.")
+        if self.coupon_code and self.coupon_placement != "checkout":
+            raise ValueError("Buy Now coupons must use checkout placement.")
+        return self
 
 
 # ============================================================
@@ -278,21 +318,37 @@ def validate_customer_coupon(
     customer_id: str = Depends(get_current_customer_id),
 ):
     try:
-        subtotal = get_customer_cart_subtotal(customer_id)
-        response = (
-            supabase
-            .rpc(
-                "validate_customer_coupon",
-                {
-                    "p_customer_id": customer_id,
-                    "p_coupon_code": payload.code,
-                    "p_coupon_placement": payload.placement,
-                    "p_subtotal": str(subtotal),
-                    "p_exclude_order_id": None,
-                },
+        if payload.variant_id:
+            response = (
+                supabase
+                .rpc(
+                    "validate_customer_buy_now_coupon",
+                    {
+                        "p_customer_id": customer_id,
+                        "p_coupon_code": payload.code,
+                        "p_coupon_placement": payload.placement,
+                        "p_variant_id": str(payload.variant_id),
+                        "p_quantity": payload.quantity,
+                    },
+                )
+                .execute()
             )
-            .execute()
-        )
+        else:
+            subtotal = get_customer_cart_subtotal(customer_id)
+            response = (
+                supabase
+                .rpc(
+                    "validate_customer_coupon",
+                    {
+                        "p_customer_id": customer_id,
+                        "p_coupon_code": payload.code,
+                        "p_coupon_placement": payload.placement,
+                        "p_subtotal": str(subtotal),
+                        "p_exclude_order_id": None,
+                    },
+                )
+                .execute()
+            )
 
         quote = response.data
         if isinstance(quote, list):
@@ -323,6 +379,93 @@ def validate_customer_coupon(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to validate this coupon. Please try again.",
+        ) from error
+
+
+@router.post("/coupons/available")
+def get_available_customer_coupons(
+    payload: AvailableCouponsRequest,
+    customer_id: str = Depends(get_current_customer_id),
+):
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        query = (
+            supabase
+            .table("coupons")
+            .select(
+                "id,code,description,discount_type,discount_value,"
+                "min_order_value,max_discount_amount,starts_at,expires_at,"
+                "first_order_only,display_locations"
+            )
+            .eq("is_active", True)
+            .contains("display_locations", [payload.placement])
+            .lte("starts_at", now)
+            .gt("expires_at", now)
+            .order("created_at", desc=True)
+            .limit(100)
+        )
+        coupons = query.execute().data or []
+
+        cart_subtotal = (
+            get_customer_cart_subtotal(customer_id)
+            if not payload.variant_id
+            else None
+        )
+        available = []
+
+        for coupon in coupons:
+            if payload.variant_id:
+                quote_response = (
+                    supabase
+                    .rpc(
+                        "validate_customer_buy_now_coupon",
+                        {
+                            "p_customer_id": customer_id,
+                            "p_coupon_code": coupon["code"],
+                            "p_coupon_placement": payload.placement,
+                            "p_variant_id": str(payload.variant_id),
+                            "p_quantity": payload.quantity,
+                        },
+                    )
+                    .execute()
+                )
+            else:
+                quote_response = (
+                    supabase
+                    .rpc(
+                        "validate_customer_coupon",
+                        {
+                            "p_customer_id": customer_id,
+                            "p_coupon_code": coupon["code"],
+                            "p_coupon_placement": payload.placement,
+                            "p_subtotal": str(cart_subtotal),
+                            "p_exclude_order_id": None,
+                        },
+                    )
+                    .execute()
+                )
+
+            quote = quote_response.data
+            if isinstance(quote, list):
+                quote = quote[0] if quote else None
+
+            if isinstance(quote, dict) and quote.get("valid") is True:
+                available.append({**coupon, **quote})
+
+        return {
+            "status": "success",
+            "count": len(available),
+            "data": available,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        logger.exception("Failed to retrieve eligible customer coupons")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve eligible coupons. Please try again.",
         ) from error
 
 
@@ -470,17 +613,30 @@ def create_buy_now_order(
 ):
 
     try:
+        function_name = (
+            "create_buy_now_order_with_coupon"
+            if payload.coupon_code
+            else "create_buy_now_order"
+        )
+        rpc_params: dict[str, object] = {
+            "p_customer_id": customer_id,
+            "p_address_id": str(payload.address_id),
+            "p_variant_id": str(payload.variant_id),
+            "p_quantity": payload.quantity,
+            "p_payment_method": "cod",
+        }
+
+        if payload.coupon_code:
+            rpc_params.update({
+                "p_coupon_code": payload.coupon_code,
+                "p_coupon_placement": payload.coupon_placement,
+            })
+
         response = (
             supabase
             .rpc(
-                "create_buy_now_order",
-                {
-                    "p_customer_id": customer_id,
-                    "p_address_id": str(payload.address_id),
-                    "p_variant_id": str(payload.variant_id),
-                    "p_quantity": payload.quantity,
-                    "p_payment_method": "cod",
-                },
+                function_name,
+                rpc_params,
             )
             .execute()
         )
@@ -600,6 +756,12 @@ def create_buy_now_order(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid quantity or payment method.",
+            )
+
+        if "coupon" in lower_message:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=message,
             )
 
         raise HTTPException(
