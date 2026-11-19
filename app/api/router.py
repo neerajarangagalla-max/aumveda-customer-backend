@@ -21,6 +21,7 @@ from app.api.admin import (
     notifications as admin_notifications,
     support as admin_support,
     content_management as admin_content_management,
+    faqs as admin_faqs,
 )
 
 from app.api.routes import (
@@ -28,6 +29,7 @@ from app.api.routes import (
     auth,
     cart,
     categories,
+    chatbot,
     database,
     health,
     home,
@@ -69,6 +71,7 @@ api_router.include_router(admin_product_images.router)
 api_router.include_router(support.router)
 api_router.include_router(site_settings.router)
 api_router.include_router(vendor_router)
+api_router.include_router(chatbot.router)
 
 # ============================================================
 # Admin API routes
@@ -91,3 +94,4 @@ api_router.include_router(admin_coupons.router)
 api_router.include_router(admin_notifications.router)
 api_router.include_router(admin_support.router)
 api_router.include_router(admin_content_management.router)
+api_router.include_router(admin_faqs.router)
