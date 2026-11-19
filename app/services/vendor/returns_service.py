@@ -168,7 +168,7 @@ def _get_order(request: dict):
         supabase_admin
         .table("orders")
         .select(
-            "id,order_number,shipping_address,"
+            "id,order_number,coupon_code,discount,shipping_address,"
             "status,created_at"
         )
         .eq("id", request["order_id"])

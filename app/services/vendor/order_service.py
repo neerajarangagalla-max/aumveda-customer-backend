@@ -135,7 +135,7 @@ def _get_order(order_id: str) -> dict:
                 "id,order_number,customer_id,"
                 "shipping_address_id,shipping_address,"
                 "billing_address,status,payment_status,"
-                "subtotal,discount,shipping,tax,"
+                "subtotal,discount,coupon_code,shipping,tax,"
                 "total_amount,currency,customer_notes,"
                 "payment_method,created_at,updated_at"
             )
@@ -223,6 +223,12 @@ def list_vendor_orders(
                 "payment_method": order.get(
                     "payment_method"
                 ),
+                "coupon_code": order.get(
+                    "coupon_code"
+                ),
+                "discount": order.get(
+                    "discount"
+                ),
                 "currency": order.get(
                     "currency"
                 ),
@@ -290,6 +296,12 @@ def get_vendor_order(
         ),
         "payment_method": order.get(
             "payment_method"
+        ),
+        "coupon_code": order.get(
+            "coupon_code"
+        ),
+        "discount": order.get(
+            "discount"
         ),
         "currency": order.get(
             "currency"

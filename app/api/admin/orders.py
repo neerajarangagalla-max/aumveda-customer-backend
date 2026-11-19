@@ -242,7 +242,8 @@ def download_invoice(order_id: str):
             supabase.table("orders")
             .select(
                 "id, order_number, payment_status, currency, "
-                "subtotal, shipping, discount, tax, total_amount, created_at"
+                "subtotal, shipping, discount, coupon_code, tax, "
+                "total_amount, created_at"
             )
             .eq("id", order_id)
             .maybe_single()
@@ -386,13 +387,28 @@ def download_invoice(order_id: str):
 
         y -= 18
 
-        pdf.drawString(
-            350,
-            y,
-            f"Discount: {currency} {float(order.get('discount') or 0):.2f}",
-        )
+        if order.get("coupon_code"):
+            pdf.drawString(
+                350,
+                y,
+                f"Coupon: {order['coupon_code']}",
+            )
+            y -= 18
 
-        y -= 18
+        if float(order.get("discount") or 0) > 0:
+            discount_label = (
+                "Coupon discount"
+                if order.get("coupon_code")
+                else "Discount"
+            )
+            pdf.drawString(
+                350,
+                y,
+                f"{discount_label}: "
+                f"{currency} {float(order.get('discount') or 0):.2f}",
+            )
+
+            y -= 18
 
         pdf.drawString(
             350,

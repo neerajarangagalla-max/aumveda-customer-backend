@@ -254,7 +254,7 @@ def add_return_request_details(return_requests: list[dict]) -> list[dict]:
     if order_ids:
         orders_result = (
             supabase.table("orders")
-            .select("id, order_number")
+            .select("id, order_number, coupon_code, discount")
             .in_("id", order_ids)
             .execute()
         )

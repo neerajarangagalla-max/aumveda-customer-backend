@@ -1270,6 +1270,7 @@ def download_invoice(
                 subtotal,
                 shipping,
                 discount,
+                coupon_code,
                 tax,
                 total_amount,
                 created_at
@@ -1620,19 +1621,37 @@ def download_invoice(
 
         y -= 18
 
-        pdf.drawString(
-            summary_x,
-            y,
-            "Discount",
-        )
+        if order.get("coupon_code"):
+            pdf.drawString(
+                summary_x,
+                y,
+                "Coupon",
+            )
+            pdf.drawRightString(
+                value_x,
+                y,
+                str(order["coupon_code"]),
+            )
+            y -= 18
 
-        pdf.drawRightString(
-            value_x,
-            y,
-            money(order.get("discount")),
-        )
+        if float(order.get("discount") or 0) > 0:
+            pdf.drawString(
+                summary_x,
+                y,
+                (
+                    "Coupon discount"
+                    if order.get("coupon_code")
+                    else "Discount"
+                ),
+            )
 
-        y -= 18
+            pdf.drawRightString(
+                value_x,
+                y,
+                money(order.get("discount")),
+            )
+
+            y -= 18
 
         pdf.drawString(
             summary_x,
@@ -1752,6 +1771,7 @@ def get_order(
                 subtotal,
                 shipping,
                 discount,
+                coupon_code,
                 tax,
                 total_amount,
                 customer_notes,
