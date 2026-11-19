@@ -1375,7 +1375,12 @@ def get_vendor(
         pending_products = sum(
             1
             for product in products
-            if str(product.get("approval_status", "")).lower() == "pending"
+            if (
+                str(product.get("approval_status") or "").lower()
+                == "pending"
+                or str(product.get("status") or "").lower()
+                == "pending"
+            )
         )
 
         delivered_order_items = [
@@ -2200,7 +2205,12 @@ def get_vendor_details(vendor_id: UUID):
         pending_products = sum(
             1
             for product in products
-            if str(product.get("approval_status", "")).lower() == "pending"
+            if (
+                str(product.get("approval_status") or "").lower()
+                == "pending"
+                or str(product.get("status") or "").lower()
+                == "pending"
+            )
         )
 
         rejected_products = sum(
