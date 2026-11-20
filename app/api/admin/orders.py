@@ -34,6 +34,10 @@ class OrderStatusUpdate(BaseModel):
     ]
 
 
+class CodPaymentStatusUpdate(BaseModel):
+    payment_status: Literal["paid"]
+
+
 
 ALLOWED_ORDER_TRANSITIONS = {
     "placed": {"processing", "cancelled"},
@@ -464,6 +468,152 @@ def download_invoice(order_id: str):
             detail="Unable to generate invoice",
         ) from exc
 
+
+
+@router.patch("/{order_id}/payment-status")
+def mark_cod_payment_successful(
+    order_id: str,
+    payload: CodPaymentStatusUpdate,
+    current_admin=Depends(get_current_admin),
+):
+    try:
+        existing = (
+            supabase.table("orders")
+            .select(
+                "id, order_number, status, payment_method, "
+                "payment_status, total_amount, currency"
+            )
+            .eq("id", order_id)
+            .maybe_single()
+            .execute()
+        )
+
+        order = existing.data
+        if not order:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        if str(order.get("payment_method") or "").lower() != "cod":
+            raise HTTPException(
+                status_code=400,
+                detail="Only COD orders can be marked successful here.",
+            )
+
+        if str(order.get("status") or "").lower() != "delivered":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "COD payment can only be marked successful "
+                    "after the order is delivered and cash is collected."
+                ),
+            )
+
+        payment_status = str(
+            order.get("payment_status") or ""
+        ).lower()
+        if payment_status not in {"pending", "paid"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Only pending COD payments can be marked successful.",
+            )
+
+        result = supabase.rpc(
+            "admin_record_cod_payment",
+            {
+                "p_order_id": order_id,
+                "p_admin_id": str(current_admin.id),
+            },
+        ).execute()
+
+        response = result.data
+        if not isinstance(response, dict):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Supabase did not confirm the COD payment "
+                    "and payment record."
+                ),
+            )
+
+        error_details = {
+            "order_not_found": (
+                404,
+                "Order not found.",
+            ),
+            "not_cod": (
+                400,
+                "Only COD orders can be marked successful here.",
+            ),
+            "not_delivered": (
+                400,
+                "COD payment can only be recorded after delivery.",
+            ),
+            "invalid_payment_status": (
+                400,
+                "Only pending COD payments can be marked successful.",
+            ),
+            "invalid_amount": (
+                400,
+                "The order amount must be positive to record payment.",
+            ),
+            "payment_record_mismatch": (
+                409,
+                "An existing COD payment record does not match the order.",
+            ),
+        }
+        error = response.get("error")
+        if isinstance(error, str) and error in error_details:
+            status_code, detail = error_details[error]
+            raise HTTPException(
+                status_code=status_code,
+                detail=detail,
+            )
+
+        updated_order = response.get("order")
+        payment_record = response.get("payment")
+        if (
+            not isinstance(updated_order, dict)
+            or updated_order.get("payment_status") != "paid"
+            or not isinstance(payment_record, dict)
+            or payment_record.get("status") != "successful"
+        ):
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Supabase did not confirm the COD payment "
+                    "and payment record."
+                ),
+            )
+
+        logger.info(
+            "Admin %s confirmed COD payment for order %s",
+            current_admin.id,
+            order_id,
+        )
+
+        return {
+            "message": "COD payment and payment record confirmed.",
+            "order": updated_order,
+            "payment": payment_record,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Failed to confirm COD payment for order %s",
+            order_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Unable to record COD payment. Ensure the "
+                "Supabase COD payment function is installed."
+            ),
+        ) from exc
 
 
 @router.patch("/{order_id}/status")
