@@ -25,6 +25,39 @@ class InventoryAdjustmentRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+def get_default_low_stock_threshold() -> int | None:
+    result = (
+        supabase.table("site_settings")
+        .select("setting_value")
+        .eq("setting_key", "inventory.low_stock_threshold")
+        .maybe_single()
+        .execute()
+    )
+    if not result.data:
+        return None
+
+    value = result.data.get("setting_value")
+    if isinstance(value, bool):
+        raise HTTPException(
+            status_code=500,
+            detail="The configured low-stock threshold is invalid.",
+        )
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="The configured low-stock threshold is invalid.",
+        ) from exc
+
+    if threshold < 0 or str(threshold) != str(value).strip():
+        raise HTTPException(
+            status_code=500,
+            detail="The configured low-stock threshold is invalid.",
+        )
+    return threshold
+
+
 def enrich_transaction_items(items: list[dict]) -> list[dict]:
     """Attach product and variant details to inventory transactions."""
     if not items:
@@ -174,6 +207,7 @@ def list_inventory_stock(
     offset: int = Query(default=0, ge=0),
 ):
     try:
+        default_low_stock_threshold = get_default_low_stock_threshold()
         query = supabase.table("product_variants").select(
             "id, product_id, sku, name, price, "
             "stock_quantity, is_active, attributes",
@@ -226,8 +260,11 @@ def list_inventory_stock(
             "total": result.count or 0,
             "limit": limit,
             "offset": offset,
+            "default_low_stock_threshold": default_low_stock_threshold,
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Unable to retrieve inventory stock")
         raise HTTPException(

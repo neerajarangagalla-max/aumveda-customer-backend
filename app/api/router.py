@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from app.api.vendor.router import vendor_router
-
 from app.api.admin import (
     banners as admin_banners,
     categories as admin_categories,
@@ -11,7 +10,6 @@ from app.api.admin import (
     inventory as admin_inventory,
     orders as admin_orders,
     products as admin_products,
-    reports as admin_reports,
     returns as admin_returns,
     reviews as admin_reviews,
     settings as admin_settings,
@@ -87,7 +85,6 @@ api_router.include_router(admin_orders.router)
 api_router.include_router(admin_inventory.router)
 api_router.include_router(admin_reviews.router)
 api_router.include_router(admin_finance.router)
-api_router.include_router(admin_reports.router)
 api_router.include_router(admin_settings.router)
 api_router.include_router(admin_returns.router)
 api_router.include_router(admin_coupons.router)

@@ -33,14 +33,35 @@ def get_dashboard_summary():
                 "profiles", {"role": "customer"}
             ),
             "total_vendors": count_rows("vendors"),
+            "approved_vendors": count_rows(
+                "vendors", {"status": "approved"}
+            ),
             "pending_vendors": count_rows(
                 "vendors", {"status": "pending"}
             ),
             "total_products": count_rows("products"),
+            "active_products": count_rows(
+                "products", {"status": "active"}
+            ),
             "pending_products": count_rows(
                 "products", {"status": "pending"}
             ),
             "total_orders": count_rows("orders"),
+            "placed_orders": count_rows(
+                "orders", {"status": "placed"}
+            ),
+            "processing_orders": count_rows(
+                "orders", {"status": "processing"}
+            ),
+            "shipped_orders": count_rows(
+                "orders", {"status": "shipped"}
+            ),
+            "paid_orders": count_rows(
+                "orders", {"payment_status": "paid"}
+            ),
+            "pending_payment_orders": count_rows(
+                "orders", {"payment_status": "pending"}
+            ),
         }
     except Exception as exc:
         logger.exception("Failed to load dashboard statistics")

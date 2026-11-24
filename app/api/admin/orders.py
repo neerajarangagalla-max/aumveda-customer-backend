@@ -66,7 +66,7 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
     order_items_result = (
         supabase.table("order_items")
         .select(
-            "id, order_id, product_id, product_name, variant_name, "
+            "id, order_id, product_id, vendor_id, product_name, variant_name, "
             "quantity, unit_price, total_price"
         )
         .in_("order_id", order_ids)
@@ -97,8 +97,27 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
         for item in order_items
         if item.get("product_id")
     })
+    vendor_ids = list({
+        str(item["vendor_id"])
+        for item in order_items
+        if item.get("vendor_id")
+    })
     products_by_id = {}
     images_by_product_id = {}
+    vendors_by_id = {}
+
+    if vendor_ids:
+        vendors_result = (
+            supabase.table("vendors")
+            .select("id, business_name, legal_name")
+            .in_("id", vendor_ids)
+            .execute()
+        )
+        vendors_by_id = {
+            str(vendor["id"]): vendor
+            for vendor in vendors_result.data or []
+            if vendor.get("id")
+        }
 
     if product_ids:
         products_result = (
@@ -127,6 +146,7 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
     items_by_order_id = {}
     for item in order_items:
         product_id = str(item.get("product_id") or "")
+        vendor = vendors_by_id.get(str(item.get("vendor_id") or ""), {})
         product = products_by_id.get(product_id) or {}
         images = images_by_product_id.get(product_id, [])
         primary_image = next(
@@ -150,6 +170,10 @@ def add_order_item_products(orders: list[dict]) -> list[dict]:
 
         item["product_name"] = (
             item.get("product_name") or product.get("name")
+        )
+        item["vendor_name"] = (
+            vendor.get("business_name")
+            or vendor.get("legal_name")
         )
         item["image_url"] = (
             primary_image.get("image_url")
@@ -577,7 +601,7 @@ def mark_cod_payment_successful(
             not isinstance(updated_order, dict)
             or updated_order.get("payment_status") != "paid"
             or not isinstance(payment_record, dict)
-            or payment_record.get("status") != "successful"
+            or payment_record.get("status") != "paid"
         ):
 
             raise HTTPException(
