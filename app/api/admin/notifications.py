@@ -26,6 +26,8 @@ REFERENCE_TABLES = {
     "vendor_product": "products",
     "vendor_products": "products",
     "vendor_product_updated": "products",
+    "product_deletion_request": "product_deletion_requests",
+    "product_deletion_requests": "product_deletion_requests",
     "product_variant": "product_variants",
     "product_variants": "product_variants",
     "shipment": "shipments",
@@ -153,16 +155,65 @@ def enrich_notification(
     notification_type = str(
         notification.get("notification_type") or ""
     ).lower()
+    deletion_text = " ".join(
+        str(notification.get(field) or "")
+        for field in ("notification_type", "title", "message", "reference_type")
+    ).lower()
+    is_product_deletion_notification = (
+        reference_type in {
+            "product_deletion_request",
+            "product_deletion_requests",
+        }
+        or (
+            "product" in deletion_text
+            and ("deletion" in deletion_text or "delete" in deletion_text)
+        )
+    )
 
     if (
         not table_name
-        and "product" in notification_type
-        and "update" in notification_type
+        and "product" in deletion_text
+        and (
+            "update" in deletion_text
+            or "revision" in deletion_text
+            or "deletion" in deletion_text
+            or "delete" in deletion_text
+        )
     ):
         table_name = "products"
 
     if not reference_id or not table_name:
         return notification
+
+    if table_name == "product_deletion_requests":
+        request_result = (
+            supabase.table("product_deletion_requests")
+            .select("*")
+            .eq("id", str(reference_id))
+            .maybe_single()
+            .execute()
+        )
+        deletion_request = request_result.data
+
+        if not deletion_request:
+            request_result = (
+                supabase.table("product_deletion_requests")
+                .select("*")
+                .eq("product_id", str(reference_id))
+                .eq("status", "pending")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            requests = request_result.data or []
+            deletion_request = requests[0] if requests else None
+
+        if not deletion_request:
+            return notification
+
+        notification["deletion_request"] = deletion_request
+        reference_id = deletion_request.get("product_id")
+        table_name = "products"
 
     if table_name == "products":
         is_product_revision_notification = (
@@ -190,13 +241,53 @@ def enrich_notification(
         product = product_result.data
 
         if not product:
-            return notification
+            if is_product_deletion_notification and not notification.get(
+                "deletion_request"
+            ):
+                deletion_result = (
+                    supabase.table("product_deletion_requests")
+                    .select("*")
+                    .eq("id", str(reference_id))
+                    .maybe_single()
+                    .execute()
+                )
+                notification["deletion_request"] = deletion_result.data
+                if deletion_result.data:
+                    reference_id = deletion_result.data.get("product_id")
+                    product_result = (
+                        supabase.table("products")
+                        .select(
+                            "id, name, vendor_id, approval_status, status"
+                        )
+                        .eq("id", str(reference_id))
+                        .maybe_single()
+                        .execute()
+                    )
+                    product = product_result.data
+            if not product:
+                return notification
 
         notification["product_id"] = product.get("id")
         notification["product_name"] = product.get("name")
         notification["vendor_id"] = product.get("vendor_id")
         notification["approval_status"] = product.get("approval_status")
         notification["product_status"] = product.get("status")
+
+        if is_product_deletion_notification:
+            deletion_request = notification.get("deletion_request")
+            if not deletion_request:
+                deletion_result = (
+                    supabase.table("product_deletion_requests")
+                    .select("*")
+                    .eq("product_id", str(reference_id))
+                    .eq("status", "pending")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                requests = deletion_result.data or []
+                deletion_request = requests[0] if requests else None
+            notification["deletion_request"] = deletion_request
 
         if is_product_revision_notification:
             revision_result = (

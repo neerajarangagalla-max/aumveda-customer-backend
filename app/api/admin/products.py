@@ -593,6 +593,7 @@ def review_product_revision(
 
     except Exception as exc:
         message = str(exc).lower()
+        print("PRODUCT REVISION REVIEW ERROR:", repr(exc))
         if "revision_not_found" in message:
             raise HTTPException(
                 404,
@@ -603,9 +604,93 @@ def review_product_revision(
                 409,
                 "Product revision has already been reviewed",
             ) from exc
+        if (
+            "admin_review_product_revision" in message
+            and (
+                "schema cache" in message
+                or "could not find the function" in message
+                or "function not found" in message
+            )
+        ):
+            raise HTTPException(
+                503,
+                (
+                    "Product revision approval is not configured in Supabase. "
+                    "Run the approval function SQL and refresh the API schema."
+                ),
+            ) from exc
         raise HTTPException(
             500,
             "Unable to review product revision",
+        ) from exc
+
+
+@router.patch("/{product_id}/deletion-request/{request_id}/approval")
+def review_product_deletion_request(
+    product_id: UUID,
+    request_id: UUID,
+    approval_status: Literal["approved", "rejected"],
+):
+    try:
+        result = supabase.rpc(
+            "admin_review_product_deletion_request",
+            {
+                "p_product_id": str(product_id),
+                "p_request_id": str(request_id),
+                "p_approval_status": approval_status,
+            },
+        ).execute()
+
+        if not result.data:
+            raise HTTPException(
+                500,
+                "Product deletion review returned no result",
+            )
+
+        return result.data
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        message = str(exc).lower()
+        print("PRODUCT DELETION REVIEW ERROR:", repr(exc))
+        if "deletion_request_not_found" in message:
+            raise HTTPException(
+                404,
+                "Pending product deletion request not found",
+            ) from exc
+        if "deletion_request_not_pending" in message:
+            raise HTTPException(
+                409,
+                "Product deletion request has already been reviewed",
+            ) from exc
+        if "product deletion approval is pending" in message:
+            raise HTTPException(
+                409,
+                (
+                    "The Supabase review function must mark the deletion "
+                    "request approved before marking the product deleted."
+                ),
+            ) from exc
+        if (
+            "admin_review_product_deletion_request" in message
+            and (
+                "schema cache" in message
+                or "could not find the function" in message
+                or "function not found" in message
+            )
+        ):
+            raise HTTPException(
+                503,
+                (
+                    "Product deletion approval is not configured in Supabase. "
+                    "Run the deletion approval function SQL and refresh the API schema."
+                ),
+            ) from exc
+        raise HTTPException(
+            500,
+            "Unable to review product deletion request",
         ) from exc
 
 
