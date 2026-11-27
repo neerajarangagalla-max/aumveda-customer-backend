@@ -564,6 +564,51 @@ def update_product_approval(
         ) from exc
 
 
+@router.patch("/{product_id}/revision/{revision_id}/approval")
+def review_product_revision(
+    product_id: UUID,
+    revision_id: UUID,
+    approval_status: Literal["approved", "rejected"],
+):
+    try:
+        result = supabase.rpc(
+            "admin_review_product_revision",
+            {
+                "p_product_id": str(product_id),
+                "p_revision_id": str(revision_id),
+                "p_approval_status": approval_status,
+            },
+        ).execute()
+
+        if not result.data:
+            raise HTTPException(
+                500,
+                "Product revision review returned no result",
+            )
+
+        return result.data
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        message = str(exc).lower()
+        if "revision_not_found" in message:
+            raise HTTPException(
+                404,
+                "Pending product revision not found",
+            ) from exc
+        if "revision_not_pending" in message:
+            raise HTTPException(
+                409,
+                "Product revision has already been reviewed",
+            ) from exc
+        raise HTTPException(
+            500,
+            "Unable to review product revision",
+        ) from exc
+
+
 # ---------------------------------------------------------
 # ARCHIVE PRODUCT
 # ---------------------------------------------------------

@@ -165,9 +165,24 @@ def enrich_notification(
         return notification
 
     if table_name == "products":
+        is_product_revision_notification = (
+            reference_type == "vendor_product_updated"
+            or (
+                "product" in notification_type
+                and (
+                    "update" in notification_type
+                    or "revision" in notification_type
+                )
+            )
+        )
+        product_fields = (
+            "*, product_variants(*), product_images(*)"
+            if is_product_revision_notification
+            else "id, name, vendor_id, approval_status, status"
+        )
         product_result = (
             supabase.table("products")
-            .select("id, name, vendor_id, approval_status, status")
+            .select(product_fields)
             .eq("id", str(reference_id))
             .maybe_single()
             .execute()
@@ -182,6 +197,41 @@ def enrich_notification(
         notification["vendor_id"] = product.get("vendor_id")
         notification["approval_status"] = product.get("approval_status")
         notification["product_status"] = product.get("status")
+
+        if is_product_revision_notification:
+            revision_result = (
+                supabase.table("product_revisions")
+                .select("*")
+                .eq("product_id", str(reference_id))
+                .eq("status", "pending")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            revisions = revision_result.data or []
+            notification["current_product"] = product
+            notification["revision"] = revisions[0] if revisions else None
+            category_ids = {
+                str(category_id)
+                for category_id in (
+                    product.get("category_id"),
+                    (revisions[0].get("product_data") or {}).get(
+                        "category_id"
+                    ) if revisions else None,
+                )
+                if category_id
+            }
+            if category_ids:
+                category_result = (
+                    supabase.table("categories")
+                    .select("id, name")
+                    .in_("id", list(category_ids))
+                    .execute()
+                )
+                notification["category_names"] = {
+                    str(category["id"]): category["name"]
+                    for category in (category_result.data or [])
+                }
 
         if include_vendor and product.get("vendor_id"):
             vendor_result = (
