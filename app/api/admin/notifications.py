@@ -1,4 +1,5 @@
 from uuid import UUID
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -7,6 +8,10 @@ from app.core.supabase import supabase
 from app.api.admin.orders import add_order_item_products
 from app.api.admin.returns import add_return_request_details
 from app.api.admin.support import get_support_ticket
+from app.services.vendor.product_image_service import (
+    PRODUCT_IMAGE_BUCKET,
+    _public_url_for_path,
+)
 
 
 REFERENCE_TABLES = {
@@ -53,6 +58,29 @@ SENSITIVE_NOTIFICATION_FIELDS = {
     "raw_response",
     "gateway_response",
 }
+IMAGE_FILE_EXTENSIONS = {
+    ".avif",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".svg",
+    ".webp",
+}
+IMAGE_REFERENCE_FIELDS = {
+    "image",
+    "images",
+    "image_url",
+    "image_urls",
+    "image_path",
+    "mobile_image_url",
+    "photo",
+    "photo_url",
+    "photos",
+    "thumbnail",
+    "thumbnail_url",
+    "thumbnails",
+}
 
 
 router = APIRouter(
@@ -66,7 +94,38 @@ def get_admin_id(current_admin):
     return str(current_admin.id)
 
 
-def sanitize_notification_record(value):
+def is_image_reference(field_name: str, value: str) -> bool:
+    normalized_field = field_name.lower()
+    if normalized_field in IMAGE_REFERENCE_FIELDS:
+        return True
+
+    if normalized_field not in {"file_path", "path", "storage_path"}:
+        return False
+
+    extension = urlparse(value).path.rsplit(".", 1)
+    return (
+        len(extension) == 2
+        and f".{extension[1].lower()}" in IMAGE_FILE_EXTENSIONS
+    )
+
+
+def public_notification_image_url(value: str) -> str:
+    if value.startswith(("http://", "https://", "//", "data:")):
+        return value
+
+    path = unquote(urlparse(value).path).lstrip("/")
+    storage_marker = (
+        f"storage/v1/object/public/{PRODUCT_IMAGE_BUCKET}/"
+    )
+    if storage_marker in path:
+        path = path.split(storage_marker, 1)[1]
+    elif path.startswith(f"{PRODUCT_IMAGE_BUCKET}/"):
+        path = path[len(PRODUCT_IMAGE_BUCKET) + 1:]
+
+    return _public_url_for_path(path)
+
+
+def sanitize_notification_record(value, field_name: str | None = None):
     if isinstance(value, dict):
         sanitized = {}
         for key, item in value.items():
@@ -78,7 +137,7 @@ def sanitize_notification_record(value):
             ):
                 continue
 
-            safe_item = sanitize_notification_record(item)
+            safe_item = sanitize_notification_record(item, key)
             if safe_item is not None:
                 sanitized[key] = safe_item
         return sanitized
@@ -87,11 +146,23 @@ def sanitize_notification_record(value):
         return [
             safe_item
             for item in value
-            if (safe_item := sanitize_notification_record(item)) is not None
+            if (
+                safe_item := sanitize_notification_record(
+                    item,
+                    field_name,
+                )
+            ) is not None
         ]
 
     if isinstance(value, str) and value.startswith("data:"):
         return None
+
+    if (
+        isinstance(value, str)
+        and field_name
+        and is_image_reference(field_name, value)
+    ):
+        return public_notification_image_url(value)
 
     return value
 
@@ -108,6 +179,17 @@ def fetch_reference_record(table_name: str, record_id: str):
 
     if not record:
         return None
+
+    if table_name == "products":
+        images_result = (
+            supabase.table("product_images")
+            .select("id, image_url, alt_text, is_primary, sort_order")
+            .eq("product_id", str(record_id))
+            .order("is_primary", desc=True)
+            .order("sort_order")
+            .execute()
+        )
+        record["product_images"] = images_result.data or []
 
     if table_name == "orders":
         return add_order_item_products([record])[0]
@@ -126,6 +208,7 @@ def enrich_related_records(record: dict) -> dict:
         ("customer_id", "customer", "profiles"),
         ("vendor_id", "vendor", "vendors"),
         ("product_id", "product", "products"),
+        ("category_id", "category", "categories"),
         ("product_variant_id", "product_variant", "product_variants"),
         ("variant_id", "product_variant", "product_variants"),
     )
@@ -138,6 +221,25 @@ def enrich_related_records(record: dict) -> dict:
         related_record = fetch_reference_record(table_name, str(record_id))
         if related_record:
             related_records[relation_name] = related_record
+
+    product = related_records.get("product")
+    if product:
+        product_related = {}
+        for field, relation_name, table_name in (
+            ("vendor_id", "vendor", "vendors"),
+            ("category_id", "category", "categories"),
+        ):
+            record_id = product.get(field)
+            if not record_id:
+                continue
+            related_record = fetch_reference_record(
+                table_name,
+                str(record_id),
+            )
+            if related_record:
+                product_related[relation_name] = related_record
+        if product_related:
+            product["related"] = product_related
 
     if related_records:
         record["related"] = related_records
@@ -300,6 +402,17 @@ def enrich_notification(
                 .execute()
             )
             revisions = revision_result.data or []
+            if not revisions:
+                revision_result = (
+                    supabase.table("product_revisions")
+                    .select("*")
+                    .eq("product_id", str(reference_id))
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                revisions = revision_result.data or []
+
             notification["current_product"] = product
             notification["revision"] = revisions[0] if revisions else None
             category_ids = {
@@ -358,6 +471,160 @@ def enrich_notification(
     return notification
 
 
+def enrich_notification_vendor_names(notifications: list[dict]) -> list[dict]:
+    product_reference_types = {
+        "product",
+        "products",
+        "vendor_product",
+        "vendor_products",
+        "vendor_product_updated",
+    }
+    product_variant_reference_types = {
+        "product_variant",
+        "product_variants",
+    }
+    deletion_reference_types = {
+        "product_deletion_request",
+        "product_deletion_requests",
+    }
+    product_ids_by_notification = {}
+    product_variant_ids_by_notification = {}
+    deletion_ids_by_notification = {}
+    vendor_ids_by_notification = {}
+    product_ids = set()
+    product_variant_ids = set()
+    deletion_ids = set()
+    all_vendor_ids = set()
+
+    for notification in notifications:
+        notification_id = str(notification.get("id") or "")
+        reference_type = str(
+            notification.get("reference_type") or ""
+        ).lower()
+        reference_id = str(
+            notification.get("reference_id") or ""
+        )
+        product_id = notification.get("product_id")
+        vendor_id = notification.get("vendor_id")
+
+        if product_id:
+            product_id = str(product_id)
+            product_ids_by_notification[notification_id] = product_id
+            product_ids.add(product_id)
+        elif reference_type in product_reference_types and reference_id:
+            product_ids_by_notification[notification_id] = reference_id
+            product_ids.add(reference_id)
+        elif (
+            reference_type in product_variant_reference_types
+            and reference_id
+        ):
+            product_variant_ids_by_notification[
+                notification_id
+            ] = reference_id
+            product_variant_ids.add(reference_id)
+        elif reference_type in deletion_reference_types and reference_id:
+            deletion_ids_by_notification[notification_id] = reference_id
+            deletion_ids.add(reference_id)
+        elif reference_type in {"vendor", "vendors"} and reference_id:
+            vendor_id = reference_id
+
+        if vendor_id:
+            vendor_id = str(vendor_id)
+            vendor_ids_by_notification[notification_id] = vendor_id
+            all_vendor_ids.add(vendor_id)
+
+    if product_variant_ids:
+        variants_result = (
+            supabase.table("product_variants")
+            .select("id, product_id")
+            .in_("id", list(product_variant_ids))
+            .execute()
+        )
+        variants_by_id = {
+            str(variant.get("id")): variant
+            for variant in variants_result.data or []
+            if variant.get("id")
+        }
+        for notification_id, variant_id in (
+            product_variant_ids_by_notification.items()
+        ):
+            variant = variants_by_id.get(variant_id)
+            if not variant:
+                continue
+            product_id = variant.get("product_id")
+            if product_id:
+                product_id = str(product_id)
+                product_ids_by_notification[notification_id] = product_id
+                product_ids.add(product_id)
+
+    if deletion_ids:
+        deletion_result = (
+            supabase.table("product_deletion_requests")
+            .select("id, product_id")
+            .in_("id", list(deletion_ids))
+            .execute()
+        )
+        for request in deletion_result.data or []:
+            notification_ids = [
+                notification_id
+                for notification_id, deletion_id
+                in deletion_ids_by_notification.items()
+                if deletion_id == str(request.get("id"))
+            ]
+            product_id = request.get("product_id")
+            if not product_id:
+                continue
+            product_id = str(product_id)
+            product_ids.add(product_id)
+            for notification_id in notification_ids:
+                product_ids_by_notification[notification_id] = product_id
+
+    if product_ids:
+        products_result = (
+            supabase.table("products")
+            .select("id, vendor_id")
+            .in_("id", list(product_ids))
+            .execute()
+        )
+        product_vendor_ids = {
+            str(product.get("id")): str(product["vendor_id"])
+            for product in products_result.data or []
+            if product.get("id") and product.get("vendor_id")
+        }
+        for notification_id, product_id in product_ids_by_notification.items():
+            vendor_id = product_vendor_ids.get(product_id)
+            if vendor_id:
+                vendor_ids_by_notification.setdefault(
+                    notification_id,
+                    vendor_id,
+                )
+                all_vendor_ids.add(vendor_id)
+
+    if all_vendor_ids:
+        vendors_result = (
+            supabase.table("vendors")
+            .select("id, business_name, legal_name")
+            .in_("id", list(all_vendor_ids))
+            .execute()
+        )
+        vendor_names = {
+            str(vendor.get("id")): (
+                vendor.get("business_name")
+                or vendor.get("legal_name")
+            )
+            for vendor in vendors_result.data or []
+            if vendor.get("id")
+        }
+        for notification in notifications:
+            notification_id = str(notification.get("id") or "")
+            vendor_id = vendor_ids_by_notification.get(notification_id)
+            vendor_name = vendor_names.get(vendor_id)
+            if vendor_name:
+                notification["vendor_name"] = vendor_name
+
+    return notifications
+
+
 @router.get("")
 def list_notifications(
     current_admin=Depends(get_current_admin),
@@ -389,7 +656,9 @@ def list_notifications(
             .execute()
         )
 
-        notifications = result.data or []
+        notifications = enrich_notification_vendor_names(
+            result.data or []
+        )
 
         return {
             "items": notifications,
@@ -465,6 +734,7 @@ def get_notification(
         raise
 
     except Exception as exc:
+        print("ADMIN NOTIFICATION DETAIL ERROR:", repr(exc))
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve notification",
